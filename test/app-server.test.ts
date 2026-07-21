@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { TokenRefreshError, type AuthSession, type Session } from "../src/index.js";
-import { AppServerRpcError, createAppServerClient, type AppServerClient } from "../src/app-server/index.js";
+import { AppServerError, AppServerRpcError, createAppServerClient, type AppServerClient } from "../src/app-server/index.js";
 
 const fakeCodex = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));
 const subject = "app-user-42";
@@ -52,6 +52,17 @@ async function waitForDead(pid: number): Promise<void> {
 }
 
 describe("app-server invariants", () => {
+  it("fails fast when the Codex CLI cannot be resolved", async () => {
+    vi.stubEnv("PATH", "");
+    try {
+      const failure = await createAppServerClient(authSession(), subject).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(AppServerError);
+      expect((failure as Error).message).toBe("Codex CLI not found; install @openai/codex or pass codexBin");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("13. sends byte-exact newline JSON initialize then initialized before auth", async () => {
     const work = await workspace();
     let client: AppServerClient | undefined;

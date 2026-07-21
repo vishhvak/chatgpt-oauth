@@ -45,6 +45,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "build": "tsup",
+    "prepublishOnly": "pnpm build",
     "build:render-service": "tsup --config examples/render-service/tsup.config.ts",
     "render-service": "pnpm build && pnpm build:render-service && node examples/render-service/dist/server/index.js"
   },

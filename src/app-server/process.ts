@@ -32,7 +32,8 @@ async function resolveBinary(explicit?: string, environment: NodeJS.ProcessEnv =
     if (await isExecutable(candidate)) return candidate;
   }
   const local = join(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "codex.cmd" : "codex");
-  return await isExecutable(local) ? local : "codex";
+  if (await isExecutable(local)) return local;
+  throw new AppServerError("Codex CLI not found; install @openai/codex or pass codexBin");
 }
 
 function minimalEnvironment(overrides: Record<string, string> | undefined, codexHome: string): NodeJS.ProcessEnv {
@@ -107,12 +108,12 @@ async function killProcessTree(child: ChildProcessWithoutNullStreams): Promise<v
 }
 
 export async function spawnAppServer(options: AppServerProcessOptions): Promise<AppServerProcess> {
+  const binary = await resolveBinary(options.codexBin);
   const temporaryHome = options.codexHome === undefined;
   const codexHome = options.codexHome ?? await mkdtemp(join(tmpdir(), "chatgpt-oauth-codex-"));
   await assertIsolatedHome(codexHome);
   await mkdir(codexHome, { recursive: true, mode: 0o700 });
   await chmod(codexHome, 0o700);
-  const binary = await resolveBinary(options.codexBin);
   const child = spawn(binary, ["app-server", "-c", 'cli_auth_credentials_store="ephemeral"'], {
     detached: process.platform !== "win32",
     env: minimalEnvironment(options.env, codexHome),

@@ -122,11 +122,56 @@ The injected SecureStore adapter serializes CAS and logout inside one JavaScript
 
 ## Electron quickstart
 
-Run auth and the encrypted file store in the main process. Send only `pending.url`, status metadata, and generated model output over IPC. Never send refresh tokens to the renderer. The Node quickstart works unchanged in the main process; use `shell.openExternal(pending.url)` before awaiting the loopback callback.
+Run auth in the main process and send only safe status/output over IPC:
+
+```ts
+import { shell } from "electron";
+
+const pending = await auth.beginLogin();
+await shell.openExternal(pending.url);
+const callback = await waitForLoopbackCallback(pending);
+await auth.completeLogin(mainProcessSession.userId, callback, pending);
+```
+
+Never send access or refresh tokens to the renderer.
 
 ## Tauri quickstart
 
-Use device flow in the webview with an injected secure native store, or run the Node flow in a sidecar. The sidecar owns `CredentialStore` and `AuthSession`; the webview receives the verification URL/code and safe status metadata. Do not put credentials in `localStorage`.
+Use device flow with a native secure-store bridge, or keep the complete Node flow in a sidecar:
+
+```ts
+const store = createTauriSecureCredentialStore(invoke); // native encrypted CAS
+const auth = createAuthSession({ store });
+const login = await auth.startDeviceLogin(appSession.userId);
+await openUrl(login.verificationUrl);
+showVerificationCode(login.userCode);
+await login.wait();
+```
+
+The webview receives only the URL, code, and safe status metadata—never credentials or `localStorage` tokens.
+
+## App-server transport (experimental)
+
+`chatgpt-oauth/app-server` runs the official `codex app-server` binary behind the same `SubscriptionAI` interface. Prefer it on desktop or server hosts that can run Codex: the binary owns backend protocol drift while this package retains subject-scoped token custody.
+
+> [!CAUTION]
+> This transport is experimental because codex-rs stamps `chatgptAuthTokens` as **“[UNSTABLE] FOR OPENAI INTERNAL USE ONLY”**. Its method or token contract may change without notice. Keep the direct transport or API-key path available.
+
+```ts
+import { createAppServerClient } from "chatgpt-oauth/app-server";
+
+const ai = await createAppServerClient(auth, serverSession.userId, {
+  codexHome: "/var/lib/my-app/codex/user-isolated-home",
+});
+try {
+  const result = await ai.respond({ model: "gpt-5.4-mini", input: "Hello" });
+  console.log(result.outputText);
+} finally {
+  await ai.close();
+}
+```
+
+Each client uses an isolated `CODEX_HOME`; the child receives a minimal environment and ephemeral credential-store configuration. See `examples/node-cli/app-server.ts` for the runnable login-to-stream flow.
 
 ## Streaming
 
@@ -153,6 +198,11 @@ Every request streams. `respond()` uses the same stream and collects output-text
 
 - `createFileCredentialStore({ directory, keyFile?, env? })`
 - `waitForLoopbackCallback(pending, { port?, timeoutMs? })`
+
+### `chatgpt-oauth/app-server` (experimental)
+
+- `createAppServerClient(auth, subject, { codexBin?, codexHome?, env?, onNotification? })`
+- `AppServerError` and `AppServerRpcError`
 
 ### `chatgpt-oauth/web`
 

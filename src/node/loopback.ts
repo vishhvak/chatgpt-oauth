@@ -29,20 +29,29 @@ export function waitForLoopbackCallback(pending: PendingLogin, options: Loopback
         response.end("Not found");
         return;
       }
-      try {
-        // Validate state before reading code/error to keep every attacker path equivalent.
-        assertState(pending.state, callback.searchParams.get("state"));
-        const error = callback.searchParams.get("error");
-        const code = callback.searchParams.get("code");
-        if (error !== null || code === null || code === "") throw new AuthError("Authorization callback was rejected.");
-        response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-        response.end(SUCCESS);
-        finish(() => { resolve(callback); });
-      } catch (error) {
+      try { assertState(pending.state, callback.searchParams.get("state")); }
+      catch {
+        // Untrusted localhost probes must not cancel the real browser callback.
         response.writeHead(400, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
         response.end(FAILURE);
-        finish(() => { reject(error); });
+        return;
       }
+      const error = callback.searchParams.get("error");
+      if (error !== null && error !== "") {
+        response.writeHead(400, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+        response.end(FAILURE);
+        finish(() => { reject(new AuthError("Authorization callback was rejected.")); });
+        return;
+      }
+      const code = callback.searchParams.get("code");
+      if (code === null || code === "") {
+        response.writeHead(400, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+        response.end(FAILURE);
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      response.end(SUCCESS);
+      finish(() => { resolve(callback); });
     });
     const timeout = setTimeout(() => {
       finish(() => { reject(new TransportError("OAuth loopback callback timed out.")); });

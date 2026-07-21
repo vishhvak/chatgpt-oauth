@@ -23,7 +23,17 @@ export interface AuthSessionOptions {
   protocol?: ProtocolOverrides;
 }
 
-const flightsByStore = new WeakMap<CredentialStore, Map<string, Promise<TokenSet>>>();
+interface RefreshResult {
+  token: TokenSet;
+  refreshed: boolean;
+}
+
+interface RefreshFlight {
+  force: boolean;
+  promise: Promise<RefreshResult>;
+}
+
+const flightsByStore = new WeakMap<CredentialStore, Map<string, RefreshFlight>>();
 
 function sessionFor(subject: string, token: TokenSet): Session {
   return {
@@ -46,7 +56,7 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
     ...(options.protocol === undefined ? {} : { protocol: options.protocol }),
     now,
   });
-  const flights = flightsByStore.get(options.store) ?? new Map<string, Promise<TokenSet>>();
+  const flights = flightsByStore.get(options.store) ?? new Map<string, RefreshFlight>();
   flightsByStore.set(options.store, flights);
 
   async function persistFresh(subject: string, token: TokenSet): Promise<TokenSet> {
@@ -75,26 +85,28 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
     throw new ReauthRequiredError(subject, current?.quarantineReason ?? reason);
   }
 
-  async function refreshOne(subject: string, force: boolean): Promise<TokenSet> {
+  async function refreshOne(subject: string, force: boolean): Promise<RefreshResult> {
     const current = await options.store.load(subject);
     if (current === null) throw new ReauthRequiredError(subject, "missing_credentials");
     if (current.quarantinedAt !== undefined) {
       throw new ReauthRequiredError(subject, current.quarantineReason ?? "quarantined");
     }
     // The second load happens inside the flight; another process may already have rotated.
-    if (!force && current.expiresAt - now() >= (options.protocol?.REFRESH_MARGIN_MS ?? PROTOCOL.REFRESH_MARGIN_MS)) return current;
+    if (!force && current.expiresAt - now() >= (options.protocol?.REFRESH_MARGIN_MS ?? PROTOCOL.REFRESH_MARGIN_MS)) {
+      return { token: current, refreshed: false };
+    }
     try {
       const next = await oauth.refresh(current);
       const swapped = await options.store.compareAndSwap(subject, current.version, next);
-      if (swapped.ok) return next;
+      if (swapped.ok) return { token: next, refreshed: true };
       if (swapped.current?.quarantinedAt !== undefined) {
         throw new ReauthRequiredError(subject, swapped.current.quarantineReason ?? "quarantined");
       }
-      if (swapped.current !== null) return swapped.current;
+      if (swapped.current !== null) return { token: swapped.current, refreshed: true };
       throw new ReauthRequiredError(subject, "credentials_deleted_during_refresh");
     } catch (error) {
       if (error instanceof TokenEndpointFailure && error.terminal) {
-        return quarantine(subject, current, error.errorCode ?? `http_${error.status}`);
+        return { token: await quarantine(subject, current, error.errorCode ?? `http_${error.status}`), refreshed: true };
       }
       if (error instanceof TokenEndpointFailure) {
         throw new TokenRefreshError(`Token refresh failed (${error.status}).`, { cause: error });
@@ -103,13 +115,22 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
     }
   }
 
-  function inFlight(subject: string, force: boolean): Promise<TokenSet> {
+  function inFlight(subject: string, force: boolean): Promise<RefreshResult> {
     const existing = flights.get(subject);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      if (!force || existing.force) return existing.promise;
+      // A forced 401 retry may share a real refresh, but must not settle on a non-force flight that skipped the network.
+      return existing.promise.then((result) => result.refreshed ? result : inFlight(subject, true));
+    }
     // One promise per store+subject prevents an in-process refresh stampede.
-    const created = refreshOne(subject, force).finally(() => { flights.delete(subject); });
+    const created: RefreshFlight = {
+      force,
+      promise: refreshOne(subject, force).finally(() => {
+        if (flights.get(subject) === created) flights.delete(subject);
+      }),
+    };
     flights.set(subject, created);
-    return created;
+    return created.promise;
   }
 
   return {
@@ -126,11 +147,11 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
       if (token === null) throw new ReauthRequiredError(subject, "missing_credentials");
       if (token.quarantinedAt !== undefined) throw new ReauthRequiredError(subject, token.quarantineReason ?? "quarantined");
       if (token.expiresAt - now() >= (options.protocol?.REFRESH_MARGIN_MS ?? PROTOCOL.REFRESH_MARGIN_MS)) return token.accessToken;
-      return (await inFlight(subject, false)).accessToken;
+      return (await inFlight(subject, false)).token.accessToken;
     },
     async refreshAccessToken(subject) {
       if (options.disabled?.() === true) throw new DisabledError();
-      return (await inFlight(subject, true)).accessToken;
+      return (await inFlight(subject, true)).token.accessToken;
     },
     async status(subject) {
       const token = await options.store.load(subject);

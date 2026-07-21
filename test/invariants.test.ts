@@ -90,6 +90,46 @@ describe("v1 invariants", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
+  it("forces a refresh when joining a non-force flight that adopts a store rotation", async () => {
+    let current = token({ expiresAt: 10_500 });
+    let loadCount = 0;
+    let releaseFlightLoad!: () => void;
+    const flightLoadStarted = new Promise<void>((resolve) => {
+      releaseFlightLoad = resolve;
+    });
+    let unblockFlightLoad!: () => void;
+    const flightLoadBlocked = new Promise<void>((resolve) => {
+      unblockFlightLoad = resolve;
+    });
+    const store: CredentialStore = {
+      async load() {
+        loadCount += 1;
+        if (loadCount === 2) {
+          releaseFlightLoad();
+          await flightLoadBlocked;
+        }
+        return structuredClone(current);
+      },
+      async compareAndSwap(_subject, expectedVersion, next) {
+        if (current.version !== expectedVersion) return { ok: false, current: structuredClone(current) };
+        current = { ...next, version: expectedVersion + 1 };
+        return { ok: true, current: structuredClone(current) };
+      },
+      async delete() {},
+    };
+    const request = vi.fn(async () => tokenResponse({ access_token: "access-forced" }));
+    const session = createAuthSession({ store, fetch: request as unknown as typeof fetch, now: () => 10_000 });
+
+    const opportunistic = session.getAccessToken(subject);
+    await flightLoadStarted;
+    const forced = session.refreshAccessToken(subject);
+    current = token({ accessToken: "access-rotated", refreshToken: "refresh-rotated", expiresAt: 9_999_999, version: 2 });
+    unblockFlightLoad();
+
+    await expect(Promise.all([opportunistic, forced])).resolves.toEqual(["access-rotated", "access-forced"]);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("4. adopts a CAS winner when another process rotates during refresh", async () => {
     let current = token();
     const winner = token({ accessToken: "winner-access", refreshToken: "winner-refresh", expiresAt: 9_999_999, version: 2 });

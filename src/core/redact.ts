@@ -4,6 +4,7 @@ const REDACTED = "[REDACTED]";
 export function redact(value: string): string {
   return value
     .replace(/\bBearer\s+[^\s,;"']+/giu, `Bearer ${REDACTED}`)
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, REDACTED)
     .replace(/("(?:access_?token|refresh_?token|id_?token|authorization)"\s*:\s*")((?:\\.|[^"\\])*(?:\\(?=$))?)("|$)/giu, `$1${REDACTED}$3`)
     .replace(/('(?:access_?token|refresh_?token|id_?token|authorization)'\s*:\s*')((?:\\.|[^'\\])*(?:\\(?=$))?)('|$)/giu, `$1${REDACTED}$3`)
     .replace(/\b(access_?token|refresh_?token|id_?token|authorization)=([^&\s]+)/giu, `$1=${REDACTED}`);

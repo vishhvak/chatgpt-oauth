@@ -83,9 +83,13 @@ async function failure(response: Response, context: string): Promise<never> {
 }
 
 function normalizeToken(payload: TokenPayload, now: number, previous?: TokenSet): TokenSet {
-  if (typeof payload.access_token !== "string" || typeof payload.expires_in !== "number") {
+  if (typeof payload.access_token !== "string") {
     throw new TransportError("Token endpoint returned an invalid response.");
   }
+  const expiresIn = Number(payload.expires_in);
+  // Unknown lifetimes expire immediately instead of extending an untrusted token.
+  const candidateExpiresAt = now + expiresIn * 1_000;
+  const expiresAt = Number.isFinite(candidateExpiresAt) ? candidateExpiresAt : now;
   const refreshToken = typeof payload.refresh_token === "string" ? payload.refresh_token : previous?.refreshToken;
   if (refreshToken === undefined) throw new TransportError("Token endpoint omitted the refresh token.");
   const idToken = typeof payload.id_token === "string" ? payload.id_token : previous?.idToken;
@@ -94,7 +98,7 @@ function normalizeToken(payload: TokenPayload, now: number, previous?: TokenSet)
     accessToken: payload.access_token,
     refreshToken,
     ...(idToken === undefined ? {} : { idToken }),
-    expiresAt: now + payload.expires_in * 1_000,
+    expiresAt,
     ...claims,
     version: (previous?.version ?? 0) + 1,
   };

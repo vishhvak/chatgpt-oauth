@@ -1,5 +1,6 @@
 /** Owns subject-bound Codex processes, per-subject turn queues, and idle teardown. */
 import type { AppServerClient } from "chatgpt-oauth/app-server";
+import type { RateLimitSnapshot } from "chatgpt-oauth";
 
 interface Entry {
   client: Promise<AppServerClient>;
@@ -68,6 +69,10 @@ export class SessionManager {
     // The tail always settles successfully so one failed turn cannot poison the queue.
     entry.queue = result.then(() => undefined, () => undefined);
     return result;
+  }
+
+  getRateLimits(subject: string): Promise<RateLimitSnapshot> {
+    return this.run(subject, (client) => client.getRateLimits());
   }
 
   async drop(subject: string): Promise<void> {

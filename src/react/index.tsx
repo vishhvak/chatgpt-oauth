@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import type { RateLimitSnapshot, RateLimitWindow } from "../core/types.js";
 import { CHATGPT_AUTH_STYLES } from "./styles.js";
 
 export interface AuthEndpoints {
@@ -223,14 +224,8 @@ export interface SignInWithChatGPTProps {
 function OpenAIMark(): ReactNode {
   return (
     <svg aria-hidden="true" className="cgpt-mark" focusable="false" viewBox="0 0 24 24">
-      <g fill="none" stroke="currentColor" strokeWidth="1.55">
-        <circle cx="12" cy="6.5" r="3.55" />
-        <circle cx="16.75" cy="9.25" r="3.55" />
-        <circle cx="16.75" cy="14.75" r="3.55" />
-        <circle cx="12" cy="17.5" r="3.55" />
-        <circle cx="7.25" cy="14.75" r="3.55" />
-        <circle cx="7.25" cy="9.25" r="3.55" />
-      </g>
+      {/* OpenAI wordmark, trademark of OpenAI; used to label the sign-in affordance. */}
+      <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" />
     </svg>
   );
 }
@@ -318,5 +313,163 @@ export function SignInWithChatGPT({
         </p>
       ) : null}
     </div>
+  );
+}
+
+export interface UsageEndpoints { usage: string }
+export type ChatGPTUsageStatus = "loading" | "ready" | "empty" | "error";
+
+export interface ChatGPTUsageState {
+  status: ChatGPTUsageStatus;
+  snapshot?: RateLimitSnapshot;
+  error?: Error;
+  refresh(): Promise<void>;
+}
+
+export interface ChatGPTUsageProps {
+  endpoints: UsageEndpoints;
+  theme?: "auto" | "light" | "dark";
+  refreshIntervalMs?: number;
+  className?: string;
+  style?: CSSProperties;
+  render?: (state: ChatGPTUsageState) => ReactNode;
+}
+
+function usageWindow(value: unknown): RateLimitWindow | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  if (typeof source.usedPercent !== "number" || !Number.isFinite(source.usedPercent)) return undefined;
+  const windowMinutes = typeof source.windowMinutes === "number" && Number.isFinite(source.windowMinutes) ? source.windowMinutes : undefined;
+  const resetsAt = typeof source.resetsAt === "number" && Number.isFinite(source.resetsAt) ? source.resetsAt : undefined;
+  return {
+    usedPercent: source.usedPercent,
+    ...(windowMinutes === undefined ? {} : { windowMinutes }),
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+  };
+}
+
+function safeUsage(value: unknown): RateLimitSnapshot {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("Usage route returned invalid metadata.");
+  const source = value as Record<string, unknown>;
+  const primary = usageWindow(source.primary);
+  const secondary = usageWindow(source.secondary);
+  return {
+    ...(primary === undefined ? {} : { primary }),
+    ...(secondary === undefined ? {} : { secondary }),
+    ...(typeof source.planType === "string" ? { planType: source.planType } : {}),
+    ...(typeof source.limitName === "string" ? { limitName: source.limitName } : {}),
+  };
+}
+
+function windowLabel(name: "Primary" | "Secondary", minutes: number | undefined): string {
+  if (minutes === undefined) return name;
+  if (minutes % 10_080 === 0) return `${minutes / 10_080} day limit`;
+  if (minutes % 1_440 === 0) return `${minutes / 1_440} day limit`;
+  if (minutes % 60 === 0) return `${minutes / 60} hour limit`;
+  return `${minutes} minute limit`;
+}
+
+function resetLabel(resetsAt: number | undefined, now: number): string | undefined {
+  if (resetsAt === undefined) return undefined;
+  const remainingMinutes = Math.max(0, Math.ceil((resetsAt * 1_000 - now) / 60_000));
+  if (remainingMinutes === 0) return "Resetting now";
+  if (remainingMinutes < 60) return `Resets in ${remainingMinutes}m`;
+  const hours = Math.floor(remainingMinutes / 60);
+  const minutes = remainingMinutes % 60;
+  return `Resets in ${hours}h${minutes === 0 ? "" : ` ${minutes}m`}`;
+}
+
+function UsageMeter({ name, window, now }: { name: "Primary" | "Secondary"; window: RateLimitWindow; now: number }): ReactNode {
+  const percent = Math.min(100, Math.max(0, window.usedPercent));
+  const reset = resetLabel(window.resetsAt, now);
+  const label = windowLabel(name, window.windowMinutes);
+  return (
+    <div className="cgpt-usage-window">
+      <div className="cgpt-usage-label"><span>{label}</span><strong>{Math.round(window.usedPercent)}% used</strong></div>
+      <div
+        aria-label={`${label}: ${Math.round(window.usedPercent)}% used`}
+        aria-valuemax={100}
+        aria-valuemin={0}
+        aria-valuenow={percent}
+        className="cgpt-usage-meter"
+        role="progressbar"
+      >
+        <span className="cgpt-usage-fill" style={{ width: `${percent}%` }} />
+      </div>
+      {reset === undefined ? null : <span className="cgpt-usage-reset">{reset}</span>}
+    </div>
+  );
+}
+
+export function ChatGPTUsage({
+  endpoints,
+  theme = "auto",
+  refreshIntervalMs = 60_000,
+  className,
+  style,
+  render,
+}: ChatGPTUsageProps): ReactNode {
+  const [view, setView] = useState<Omit<ChatGPTUsageState, "refresh">>({ status: "loading" });
+  const [now, setNow] = useState(Date.now);
+  const operation = useRef(0);
+
+  const refresh = useCallback(async () => {
+    const current = ++operation.current;
+    setView((previous) => ({ status: previous.snapshot === undefined ? "loading" : previous.status, ...(previous.snapshot === undefined ? {} : { snapshot: previous.snapshot }) }));
+    try {
+      const response = await fetch(endpoints.usage, { credentials: "same-origin", cache: "no-store" });
+      if (response.status === 401 || response.status === 404) {
+        if (operation.current === current) setView({ status: "empty", snapshot: {} });
+        return;
+      }
+      if (!response.ok) throw new Error(`Usage request failed (${response.status}).`);
+      const snapshot = safeUsage(await response.json());
+      if (operation.current === current) {
+        setView({ status: snapshot.primary === undefined && snapshot.secondary === undefined ? "empty" : "ready", snapshot });
+      }
+    } catch (cause) {
+      if (operation.current === current) setView({ status: "error", error: failure(cause, "Usage request failed.") });
+    }
+  }, [endpoints.usage]);
+
+  useInsertionEffect(() => {
+    if (render === undefined) injectStyles();
+  }, [render]);
+  useEffect(() => {
+    void refresh();
+    const refreshTimer = refreshIntervalMs > 0 ? window.setInterval(() => { void refresh(); }, refreshIntervalMs) : undefined;
+    const clockTimer = window.setInterval(() => { setNow(Date.now()); }, 30_000);
+    return () => {
+      operation.current += 1;
+      if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+      window.clearInterval(clockTimer);
+    };
+  }, [refresh, refreshIntervalMs]);
+
+  const state: ChatGPTUsageState = { ...view, refresh };
+  if (render !== undefined) return render(state);
+
+  const classes = ["cgpt-root", "cgpt-usage", `cgpt-theme-${theme}`, className].filter(Boolean).join(" ");
+  return (
+    <section aria-label="ChatGPT usage" className={classes} style={style}>
+      <div className="cgpt-usage-heading">
+        <div><span className="cgpt-usage-eyebrow">ChatGPT</span><h2>Usage limits</h2></div>
+        {view.snapshot?.planType === undefined ? null : <span className="cgpt-plan-badge">{view.snapshot.planType}</span>}
+      </div>
+      {view.status === "loading" ? <div aria-live="polite" className="cgpt-usage-state" role="status"><Spinner /> Loading usage…</div> : null}
+      {view.status === "error" ? (
+        <div className="cgpt-usage-state cgpt-usage-error" role="alert">
+          <span>{view.error?.message ?? "Unable to load usage."}</span>
+          <button type="button" onClick={() => { void refresh(); }}>Retry</button>
+        </div>
+      ) : null}
+      {view.status === "empty" ? <p className="cgpt-usage-empty">Usage becomes available after you sign in and send a request.</p> : null}
+      {view.status === "ready" && view.snapshot !== undefined ? (
+        <div className="cgpt-usage-windows">
+          {view.snapshot.primary === undefined ? null : <UsageMeter name="Primary" now={now} window={view.snapshot.primary} />}
+          {view.snapshot.secondary === undefined ? null : <UsageMeter name="Secondary" now={now} window={view.snapshot.secondary} />}
+        </div>
+      ) : null}
+    </section>
   );
 }

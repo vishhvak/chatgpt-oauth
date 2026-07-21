@@ -48,6 +48,8 @@ const result = await ai.respond({ model: "gpt-5.4-mini", input: "Explain CAS in 
 console.log(result.outputText);
 ```
 
+Pass `onRateLimits` to observe the usage headers attached to each response, or read `ai.lastRateLimits` after a turn. The direct backend transport cannot fetch usage independently because its limits arrive only on response headers.
+
 Run the complete streaming examples without adding a runtime dependency to your app:
 
 ```sh
@@ -174,8 +176,10 @@ import { createAppServerClient } from "chatgpt-oauth/app-server";
 
 const ai = await createAppServerClient(auth, serverSession.userId, {
   codexHome: "/var/lib/my-app/codex/user-isolated-home",
+  onRateLimits: (snapshot) => console.log(snapshot.primary?.usedPercent),
 });
 try {
+  console.log(await ai.getRateLimits());
   const result = await ai.respond({ model: "gpt-5.4-mini", input: "Hello" });
   console.log(result.outputText);
 } finally {
@@ -207,7 +211,7 @@ Every request streams. `respond()` uses the same stream and collects output-text
 ### `chatgpt-oauth`
 
 - `createAuthSession({ store, disabled?, fetch?, crypto?, now?, sleep?, protocol? })` returns `beginLogin`, `completeLogin`, `startDeviceLogin`, `getAccessToken`, `refreshAccessToken`, `status`, and `logout`.
-- `createClient(auth, subject, options?)` returns the `SubscriptionAI` seam: `respond()` and `stream()`.
+- `createClient(auth, subject, { onRateLimits?, ...options })` returns `respond()`, `stream()`, and the latest response-header snapshot as `lastRateLimits`. It has no standalone usage read.
 - `CredentialStore` requires `load(subject)`, `compareAndSwap(subject, expectedVersion, next)`, and `delete(subject)`.
 - `createMemoryStore()` is for tests and development only.
 - Typed failures: `StateMismatchError`, `ReauthRequiredError`, `TokenRefreshError`, `RateLimitError`, `AuthError`, `TransportError`, `DisabledError`, and `StoreError`. All inherit `ChatGPTOAuthError` and carry a `code` discriminant.
@@ -219,7 +223,7 @@ Every request streams. `respond()` uses the same stream and collects output-text
 
 ### `chatgpt-oauth/app-server` (experimental)
 
-- `createAppServerClient(auth, subject, { codexBin?, codexHome?, env?, onNotification? })`
+- `createAppServerClient(auth, subject, { codexBin?, codexHome?, env?, onNotification?, onRateLimits? })` returns the shared AI seam plus `getRateLimits()` and `close()`.
 - `AppServerError` and `AppServerRpcError`
 
 ### `chatgpt-oauth/web`
@@ -232,6 +236,7 @@ Every request streams. `respond()` uses the same stream and collects output-text
 
 - `useChatGPTAuth({ endpoints, mode? })` — `loading | signed-out | connecting | connected | error`
 - `<SignInWithChatGPT endpoints label? theme? showDisclaimer? mode? className? style? onConnected? onError? render? />`
+- `<ChatGPTUsage endpoints={{ usage }} theme? refreshIntervalMs? className? style? render? />` fetches a safe `RateLimitSnapshot` from an application-owned, subject-bound GET route.
 
 ### `chatgpt-oauth/react-native`
 

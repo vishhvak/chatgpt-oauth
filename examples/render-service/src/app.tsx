@@ -1,7 +1,7 @@
 /** Renders the local browser demo for the published React login component. */
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { SignInWithChatGPT } from "chatgpt-oauth/react";
+import { ChatGPTUsage, SignInWithChatGPT } from "chatgpt-oauth/react";
 
 const endpoints = { session: "/auth/session", login: "/auth/login", logout: "/auth/logout" };
 const initialTheme = new URLSearchParams(window.location.search).get("theme") === "dark" ? "dark" : "light";
@@ -26,6 +26,7 @@ function Demo() {
         </div>
         <div className="demo-component">
           <SignInWithChatGPT endpoints={endpoints} theme={theme} />
+          <ChatGPTUsage endpoints={{ usage: "/api/chatgpt/usage" }} theme={theme} />
         </div>
         <p className="demo-note">One application user maps to one isolated Codex process. This demo never pools identities or subscription access.</p>
       </section>
@@ -55,7 +56,7 @@ button { font: inherit; }
 .demo-theme button { background: transparent; border: 0; border-radius: 9px; color: inherit; cursor: pointer; min-height: 38px; padding: 0 14px; text-transform: capitalize; }
 .demo-theme button[aria-pressed=true] { background: color-mix(in srgb, currentColor 10%, transparent); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .demo-theme button:focus-visible { outline: 3px solid #0d8f72; outline-offset: 2px; }
-.demo-component { min-height: 102px; padding-block: 4px; }
+.demo-component { align-items: flex-start; display: flex; flex-direction: column; gap: 18px; min-height: 102px; padding-block: 4px; }
 .demo-note { border-top: 1px solid color-mix(in srgb, currentColor 10%, transparent); font-size: 12px; margin: 24px 0 0; padding-top: 18px; }
 @media (prefers-reduced-motion: reduce) { .demo-page { transition-duration: .01ms; } }
 `;

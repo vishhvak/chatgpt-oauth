@@ -114,6 +114,14 @@ const server = createServer(async (request, response) => {
         : { status: current.status, email: current.email ?? null, planType: current.planType ?? null });
       return;
     }
+    if (request.method === "GET" && url.pathname === "/api/chatgpt/usage") {
+      if (await auth.status(subject) === null) {
+        json(response, 401, { error: "Sign in with ChatGPT to view usage." });
+        return;
+      }
+      json(response, 200, await sessions.getRateLimits(subject));
+      return;
+    }
     if (request.method === "POST" && url.pathname === "/chat") {
       const chatRequest = requestShape(await readJson(request));
       response.writeHead(200, {

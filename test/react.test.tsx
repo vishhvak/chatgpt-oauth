@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SignInWithChatGPT, useChatGPTAuth } from "../src/react/index.js";
+import { ChatGPTUsage, SignInWithChatGPT, useChatGPTAuth } from "../src/react/index.js";
 
 const endpoints = { session: "/auth/session", login: "/auth/login", logout: "/auth/logout" };
 
@@ -117,5 +117,46 @@ describe("React web auth", () => {
     const directory = join(process.cwd(), "src/react");
     const source = `${await readFile(join(directory, "index.tsx"), "utf8")}\n${await readFile(join(directory, "styles.ts"), "utf8")}`;
     expect(source).not.toMatch(/from ["'](?:tailwind|bootstrap|lucide|react-icons|@fortawesome)/u);
+    expect(source).toContain("M22.2819 9.8211");
+    expect(source).not.toContain("<circle");
+    expect(source).toContain("fill: currentColor");
+  });
+
+  it("renders usage meters, reset countdowns, and a plan badge", async () => {
+    const future = Math.floor(Date.now() / 1_000) + 3_600;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply(200, {
+      primary: { usedPercent: 25, windowMinutes: 300, resetsAt: future },
+      secondary: { usedPercent: 70, windowMinutes: 10_080, resetsAt: future + 3_600 },
+      planType: "pro",
+      limitName: "Codex",
+    })));
+    render(<ChatGPTUsage endpoints={{ usage: "/api/chatgpt/usage" }} refreshIntervalMs={0} />);
+
+    expect(await screen.findByText("pro")).toBeTruthy();
+    const meters = screen.getAllByRole("progressbar");
+    expect(meters).toHaveLength(2);
+    expect(meters[0]?.getAttribute("aria-valuenow")).toBe("25");
+    expect(meters[1]?.getAttribute("aria-valuenow")).toBe("70");
+    expect(screen.getByText("5 hour limit")).toBeTruthy();
+    expect(screen.getByText("1 day limit")).toBeTruthy();
+    expect(screen.getAllByText(/Resets in \d+h/)).toHaveLength(2);
+  });
+
+  it("handles usage loading, empty, and error states", async () => {
+    const pending = new Promise<Response>(() => undefined);
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(pending));
+    const loading = render(<ChatGPTUsage endpoints={{ usage: "/usage" }} refreshIntervalMs={0} />);
+    expect(screen.getByText("Loading usage…")).toBeTruthy();
+    loading.unmount();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply(200, {})));
+    const empty = render(<ChatGPTUsage endpoints={{ usage: "/usage" }} refreshIntervalMs={0} />);
+    expect(await screen.findByText(/Usage becomes available/)).toBeTruthy();
+    empty.unmount();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply(500)));
+    render(<ChatGPTUsage endpoints={{ usage: "/usage" }} refreshIntervalMs={0} />);
+    expect((await screen.findByRole("alert")).textContent).toContain("Usage request failed (500).");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 });

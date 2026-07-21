@@ -51,6 +51,8 @@ describe("render-service SessionManager", () => {
       const clientB = await manager.run("subject-b", async (client) => client);
       expect(clientB).not.toBe(clientA1);
       expect(created.map(({ subject }) => subject)).toEqual(["subject-a", "subject-b"]);
+      await expect(manager.getRateLimits("subject-a")).resolves.toEqual({ primary: { usedPercent: 25 } });
+      expect(created.map(({ subject }) => subject)).toEqual(["subject-a", "subject-b"]);
 
       now = 1_001;
       await manager.evictIdle();

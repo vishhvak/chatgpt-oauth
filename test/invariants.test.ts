@@ -1,0 +1,238 @@
+/** Pins the twelve security and concurrency invariants required for the v1 contract. */
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import {
+  AuthError,
+  RateLimitError,
+  ReauthRequiredError,
+  StateMismatchError,
+  StoreError,
+  createAuthSession,
+  createClient,
+  createMemoryStore,
+  createPkce,
+  parseSSE,
+  pkceChallenge,
+  type AuthSession,
+  type CredentialStore,
+  type TokenSet,
+} from "../src/index.js";
+import { createFileCredentialStore, fileModes } from "../src/node/index.js";
+
+const subject = "app-user-42";
+
+function token(overrides: Partial<TokenSet> = {}): TokenSet {
+  return {
+    accessToken: "access-old",
+    refreshToken: "refresh-old",
+    expiresAt: 1,
+    version: 1,
+    ...overrides,
+  };
+}
+
+function tokenResponse(overrides: Record<string, unknown> = {}): Response {
+  return Response.json({ access_token: "access-new", refresh_token: "refresh-new", expires_in: 3_600, ...overrides });
+}
+
+function streamResponse(parts: string[], status = 200): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const part of parts) controller.enqueue(encoder.encode(part));
+      controller.close();
+    },
+  });
+  return new Response(body, { status, headers: { "content-type": "text/event-stream" } });
+}
+
+function fakeSession(overrides: Partial<AuthSession> = {}): AuthSession {
+  return {
+    async beginLogin() { throw new Error("unused"); },
+    async completeLogin() { throw new Error("unused"); },
+    async startDeviceLogin() { throw new Error("unused"); },
+    async getAccessToken() { return "access-old"; },
+    async refreshAccessToken() { return "access-new"; },
+    async status() { return { subject, status: "connected", expiresAt: Date.now(), accountId: "account-route" }; },
+    async logout() {},
+    ...overrides,
+  };
+}
+
+describe("v1 invariants", () => {
+  it("1. generates base64url PKCE/state and computes the known S256 vector", async () => {
+    const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    expect(await pkceChallenge(verifier)).toBe("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+    const generated = await createPkce();
+    expect(generated.verifier).toMatch(/^[A-Za-z0-9_-]{86}$/u);
+    expect(generated.challenge).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(generated.state).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+  });
+
+  it("2. rejects mismatched callback state before attempting token exchange", async () => {
+    const request = vi.fn();
+    const session = createAuthSession({ store: createMemoryStore(), fetch: request as unknown as typeof fetch });
+    const pending = await session.beginLogin("https://app.example/callback");
+    await expect(session.completeLogin(subject, "https://app.example/callback?state=wrong&code=secret", pending))
+      .rejects.toBeInstanceOf(StateMismatchError);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("3. collapses 20 concurrent expired-token calls into one refresh POST", async () => {
+    const store = createMemoryStore({ [subject]: token() });
+    const request = vi.fn(async () => tokenResponse());
+    const session = createAuthSession({ store, fetch: request as unknown as typeof fetch, now: () => 10_000 });
+    const values = await Promise.all(Array.from({ length: 20 }, () => session.getAccessToken(subject)));
+    expect(new Set(values)).toEqual(new Set(["access-new"]));
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("4. adopts a CAS winner when another process rotates during refresh", async () => {
+    let current = token();
+    const winner = token({ accessToken: "winner-access", refreshToken: "winner-refresh", expiresAt: 9_999_999, version: 2 });
+    const store: CredentialStore = {
+      async load() { return structuredClone(current); },
+      async compareAndSwap(_subject, expectedVersion, next) {
+        if (current.version !== expectedVersion) return { ok: false, current: structuredClone(current) };
+        current = { ...next, version: expectedVersion + 1 };
+        return { ok: true, current: structuredClone(current) };
+      },
+      async delete() {},
+    };
+    const request = vi.fn(async () => { current = winner; return tokenResponse({ access_token: "loser-access" }); });
+    const session = createAuthSession({ store, fetch: request as unknown as typeof fetch, now: () => 10_000 });
+    await expect(session.getAccessToken(subject)).resolves.toBe("winner-access");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("5. retains the old refresh token when rotation is omitted", async () => {
+    const store = createMemoryStore({ [subject]: token() });
+    const request = vi.fn(async () => tokenResponse({ refresh_token: undefined }));
+    const session = createAuthSession({ store, fetch: request as unknown as typeof fetch, now: () => 10_000 });
+    await session.getAccessToken(subject);
+    expect((await store.load(subject))?.refreshToken).toBe("refresh-old");
+  });
+
+  it("6. quarantines invalid_grant permanently but never quarantines 429", async () => {
+    const terminalStore = createMemoryStore({ [subject]: token() });
+    const terminalRequest = vi.fn(async () => Response.json({ error: "invalid_grant" }, { status: 400 }));
+    const terminal = createAuthSession({ store: terminalStore, fetch: terminalRequest as unknown as typeof fetch, now: () => 10_000 });
+    await expect(terminal.getAccessToken(subject)).rejects.toBeInstanceOf(ReauthRequiredError);
+    expect((await terminalStore.load(subject))?.quarantineReason).toBe("invalid_grant");
+    await expect(terminal.getAccessToken(subject)).rejects.toBeInstanceOf(ReauthRequiredError);
+    expect(terminalRequest).toHaveBeenCalledTimes(1);
+
+    const limitedStore = createMemoryStore({ [subject]: token() });
+    const limitedRequest = vi.fn(async () => new Response("limited", { status: 429, headers: { "retry-after": "3" } }));
+    const limited = createAuthSession({ store: limitedStore, fetch: limitedRequest as unknown as typeof fetch, now: () => 10_000 });
+    await expect(limited.getAccessToken(subject)).rejects.toBeInstanceOf(RateLimitError);
+    expect((await limitedStore.load(subject))?.quarantinedAt).toBeUndefined();
+  });
+
+  it("7. refreshes and retries inference once on 401, then surfaces a typed second 401", async () => {
+    const refresh = vi.fn(async () => "access-new");
+    const successfulFetch = vi.fn()
+      .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(streamResponse(["event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"]));
+    const client = createClient(fakeSession({ refreshAccessToken: refresh }), subject, { fetch: successfulFetch as typeof fetch });
+    await expect(client.respond({ model: "gpt-test", input: "hello" })).resolves.toMatchObject({ outputText: "" });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(successfulFetch).toHaveBeenCalledTimes(2);
+
+    const rejectedFetch = vi.fn(async () => new Response("unauthorized", { status: 401 }));
+    const rejected = createClient(fakeSession({ refreshAccessToken: refresh }), subject, { fetch: rejectedFetch as unknown as typeof fetch });
+    await expect(rejected.respond({ model: "gpt-test", input: "hello" })).rejects.toBeInstanceOf(AuthError);
+    expect(rejectedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("8. parses chunk-split, multiline, done, and unknown SSE events", async () => {
+    const response = streamResponse([
+      "event: response.output_",
+      "text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\n",
+      "event: future.event\ndata: first\ndata: second\n\n",
+      "data: [DO",
+      "NE]\n\n",
+      "event: ignored\ndata: after\n\n",
+    ]);
+    const events = [];
+    if (response.body === null) throw new Error("missing fixture body");
+    for await (const event of parseSSE(response.body)) events.push(event);
+    expect(events).toEqual([
+      { type: "response.output_text.delta", data: { type: "response.output_text.delta", delta: "Hi" }, delta: "Hi" },
+      { type: "future.event", data: "first\nsecond" },
+      { type: "done", data: null },
+    ]);
+  });
+
+  it("9. redacts bearer credentials from transport error messages", async () => {
+    const secret = "sk-secret-access-value";
+    const request = vi.fn(async () => new Response(`failure Authorization: Bearer ${secret}`, { status: 500 }));
+    const client = createClient(fakeSession(), subject, { fetch: request as unknown as typeof fetch });
+    const error = await client.respond({ model: "gpt-test", input: "hello" }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain(secret);
+    expect((error as Error).message).toContain("[REDACTED]");
+  });
+
+  it("10. enforces Node modes, encrypted roundtrip, and typed tamper failure", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "chatgpt-oauth-test-"));
+    try {
+      const store = await createFileCredentialStore({ directory, env: {} });
+      const saved = await store.compareAndSwap(subject, 0, token({ version: 99 }));
+      expect(saved.current?.version).toBe(1);
+      expect(await store.load(subject)).toMatchObject({ accessToken: "access-old", version: 1 });
+      expect(await fileModes(directory)).toEqual({ directory: 0o700, data: 0o600, key: 0o600 });
+      const dataFile = join(directory, "credentials.enc");
+      const envelope = await readFile(dataFile, "utf8");
+      expect(envelope).not.toContain("access-old");
+      await writeFile(dataFile, `${envelope.slice(0, -1)}A`);
+      await chmod(dataFile, 0o600);
+      await expect(store.load(subject)).rejects.toBeInstanceOf(StoreError);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it("11. requires a subject argument on every CredentialStore method", () => {
+    const store = createMemoryStore();
+    const subjectRequired = () => {
+      // @ts-expect-error subject is structurally mandatory
+      void store.load();
+      // @ts-expect-error subject and CAS values are structurally mandatory
+      void store.compareAndSwap();
+      // @ts-expect-error subject is structurally mandatory
+      void store.delete();
+    };
+    expect(subjectRequired).toBeTypeOf("function");
+    expect(store.load.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("12. honors device interval, slow_down backoff, pending, and success", async () => {
+    const sleeps: number[] = [];
+    let polls = 0;
+    const request = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/usercode")) {
+        return Response.json({ user_code: "ABCD-EFGH", device_auth_id: "device-1", interval: 1, expires_in: 60 });
+      }
+      if (url.endsWith("/deviceauth/token")) {
+        polls += 1;
+        if (polls === 1) return Response.json({ error: "authorization_pending" }, { status: 403 });
+        if (polls === 2) return Response.json({ error: "slow_down" }, { status: 400 });
+        return Response.json({ authorization_code: "code", code_verifier: "verifier" });
+      }
+      return tokenResponse();
+    });
+    let clock = 0;
+    const session = createAuthSession({
+      store: createMemoryStore(),
+      fetch: request as unknown as typeof fetch,
+      now: () => clock,
+      sleep: async (milliseconds) => { sleeps.push(milliseconds); clock += milliseconds; },
+    });
+    const device = await session.startDeviceLogin(subject);
+    await expect(device.wait()).resolves.toMatchObject({ accessToken: "access-new" });
+    expect(sleeps).toEqual([1_000, 6_000]);
+    expect(polls).toBe(3);
+  });
+});

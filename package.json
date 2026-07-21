@@ -9,6 +9,7 @@
   "engines": { "node": ">=20" },
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./app-server": { "types": "./dist/app-server/index.d.ts", "import": "./dist/app-server/index.js" },
     "./node": { "types": "./dist/node/index.d.ts", "import": "./dist/node/index.js" },
     "./react": { "types": "./dist/react/index.d.ts", "import": "./dist/react/index.js" },
     "./react-native": { "types": "./dist/react-native/index.d.ts", "import": "./dist/react-native/index.js" },
@@ -16,6 +17,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "build": "tsup"

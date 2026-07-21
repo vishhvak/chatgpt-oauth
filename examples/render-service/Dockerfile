@@ -18,4 +18,4 @@ RUN pnpm build \
 # The Codex binary runs inside this container. There is intentionally no
 # external app-server URL: each child process belongs to one subject for life.
 ENV NODE_ENV=production
-CMD ["node", "examples/render-service/dist/index.js"]
+CMD ["node", "examples/render-service/dist/server/index.js"]

@@ -88,10 +88,14 @@ import { SignInWithChatGPT } from "chatgpt-oauth/react";
   session: "/api/chatgpt/session",
   login: "/api/chatgpt/login",
   logout: "/api/chatgpt/logout",
-}} />
+}} theme="auto" />
 ```
 
-The component ships no CSS. Its `render={(auth) => ...}` prop exposes the full loading/error/session/actions state. Your session route must return only metadata such as `{ status, email, planType }`, never access or refresh tokens.
+The zero-config shell injects one scoped stylesheet, opens login in a popup, and polls until the safe session metadata becomes connected. Use `mode="redirect"` when popups are unsuitable. The experimental ToS disclaimer is visible by default; set `showDisclaimer={false}` only when your host UI presents the warning elsewhere.
+
+Customize it with `label`, `theme="auto" | "light" | "dark"`, `className`, `style`, `onConnected`, and `onError`. Host CSS can override `--cgpt-bg`, `--cgpt-fg`, `--cgpt-border`, `--cgpt-radius`, `--cgpt-accent`, and `--cgpt-muted`. The `render={(auth) => ...}` prop remains the complete headless escape hatch. Your session route must return only `{ status, email?, planType? }`, never access or refresh tokens.
+
+This component is web-only. React Native and native Swift/Kotlin apps should use the device flow and their platform-owned login UI rather than embedding this DOM component.
 
 ### SQL store shape
 
@@ -226,8 +230,8 @@ Every request streams. `respond()` uses the same stream and collects output-text
 
 ### `chatgpt-oauth/react`
 
-- `useChatGPTAuth({ endpoints })`
-- `<SignInWithChatGPT endpoints render? />`
+- `useChatGPTAuth({ endpoints, mode? })` — `loading | signed-out | connecting | connected | error`
+- `<SignInWithChatGPT endpoints label? theme? showDisclaimer? mode? className? style? onConnected? onError? render? />`
 
 ### `chatgpt-oauth/react-native`
 

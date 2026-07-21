@@ -1,5 +1,6 @@
 /** Runs the copy-and-own HTTP service that joins app auth, Postgres, and Codex. */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFile } from "node:fs/promises";
 import { createAuthSession, type PendingLogin, type ResponseRequest } from "chatgpt-oauth";
 import { createAppServerClient } from "chatgpt-oauth/app-server";
 import { requireDemoSubject } from "./demo-session.js";
@@ -55,13 +56,30 @@ const sessions = new SessionManager({
 });
 const pending = new Map<string, { login: PendingLogin; expiresAt: number }>();
 const loginTtlMs = 5 * 60_000;
+const clientBundle = readFile(new URL("../public/client.global.js", import.meta.url));
+
+const demoHtml = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ChatGPT OAuth demo</title></head>
+<body><div id="app"></div><script defer src="/assets/client.js"></script></body>
+</html>`;
+
+const callbackHtml = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connected</title></head>
+<body><p>ChatGPT connected. You can close this window.</p><script>window.close();setTimeout(function(){location.replace('/')},150)</script></body></html>`;
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", publicUrl);
   const subject = requireDemoSubject(request, response, sessionSecret, publicUrl.protocol === "https:");
   try {
     if (request.method === "GET" && url.pathname === "/") {
-      json(response, 200, { service: "chatgpt-oauth render template" });
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(demoHtml);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/assets/client.js") {
+      response.writeHead(200, { "cache-control": "no-store", "content-type": "text/javascript; charset=utf-8" });
+      response.end(await clientBundle);
       return;
     }
     if (request.method === "POST" && url.pathname === "/auth/login") {
@@ -79,8 +97,8 @@ const server = createServer(async (request, response) => {
         return;
       }
       await auth.completeLogin(subject, url, saved.login);
-      response.writeHead(303, { location: "/" });
-      response.end();
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(callbackHtml);
       return;
     }
     if (request.method === "POST" && url.pathname === "/auth/logout") {

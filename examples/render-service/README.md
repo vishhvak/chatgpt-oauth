@@ -42,7 +42,7 @@ PUBLIC_URL=http://localhost:3000 \
 pnpm render-service
 ```
 
-Open `POST /auth/login` from a browser session, follow the returned authorization URL, and return through `/auth/callback`. `GET /auth/session` returns status, email, and plan metadata only; it never returns access or refresh tokens. `POST /chat` streams the authenticated subject's answer, and `POST /auth/logout` deletes that subject's credentials and closes its process.
+Open `http://localhost:3000/` for the bundled React demo—there is no CDN, font, icon, or stylesheet fetch. The button opens ChatGPT in a popup and becomes an identity chip when polling sees the completed login; use the component's `mode="redirect"` option when popups are unsuitable. `GET /auth/session` returns status, email, and plan metadata only; it never returns access or refresh tokens. `POST /chat` streams the authenticated subject's answer, and `POST /auth/logout` deletes that subject's credentials and closes its process.
 
 ## Deploy on Render
 

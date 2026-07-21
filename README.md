@@ -11,7 +11,7 @@ Experimental, unofficial OAuth and subscription transport for JavaScript apps wh
 
 Every credential operation requires a `subject` derived by your server from its own authenticated session. Never accept that value from a request body, never use `chatgpt-account-id` as application identity, and never use a global credential row.
 
-Concrete failure this prevents: ai-finances once seeded one global OAuth token. Bob's login could replace Vish's bearer, so Vish's next request used Bob's subscription while both requests raced to rotate the same refresh token. With this API, the only legal calls are `store.load("vish-app-user-id")` and `store.load("bob-app-user-id")`; there is no `store.load()`.
+Concrete failure this prevents: a naive integration seeds one global OAuth token, so Bob's login replaces Alice's bearer and Alice's next request runs on Bob's subscription while both requests race to rotate the same refresh token. With this API the only legal calls are `store.load("alice-app-user-id")` and `store.load("bob-app-user-id")`; there is no `store.load()`.
 
 `accountId`, `planType`, and `email` are decoded from an unverified JWT. They are useful for routing and display only. They must never authorize access.
 

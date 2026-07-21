@@ -9,7 +9,7 @@ This directory is a copy-and-own deployment template, not a server framework exp
 
 The signed cookie in this example is deliberately tiny demo authentication. Replace it with your product's real server-side session before deployment. The authenticated `subject` must be derived by the server and must never come from a request body, query string, or browser-selected account ID.
 
-This prevents the ai-finances pooling bug: one global OAuth row let Bob's login replace Vish's bearer, so Vish's next request could run on Bob's subscription. Here, credentials, pending logins, and processes are all keyed by your application's authenticated subject.
+This prevents the classic pooling bug: one global OAuth row lets Bob's login replace Alice's bearer, so Alice's next request could run on Bob's subscription. Here, credentials, pending logins, and processes are all keyed by your application's authenticated subject.
 
 Every Codex child process is bound to exactly one subject for its entire life. `SessionManager` may reuse that process for later requests by the same subject, but it must never route another subject through it. Idle processes are closed and evicted after 10 minutes by default, and all processes close during container shutdown. Turns for one subject queue rather than sharing its process concurrently.
 

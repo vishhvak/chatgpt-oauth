@@ -3,3 +3,12 @@ dist/
 coverage/
 *.log
 .DS_Store
+
+# local planning / prep artifacts — never push
+.lavish/
+.claude/
+SPEC.md
+REFERENCES.md
+HANDOFF.md
+PROTOCOL.md
+consensus.html

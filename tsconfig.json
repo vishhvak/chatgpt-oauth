@@ -13,7 +13,16 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "types": ["node", "vitest/globals"],
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "chatgpt-oauth": ["./src/index.ts"],
+      "chatgpt-oauth/app-server": ["./src/app-server/index.ts"],
+      "chatgpt-oauth/node": ["./src/node/index.ts"],
+      "chatgpt-oauth/web": ["./src/web/index.ts"],
+      "chatgpt-oauth/react": ["./src/react/index.tsx"],
+      "chatgpt-oauth/react-native": ["./src/react-native/index.ts"]
+    }
   },
-  "include": ["src", "test", "eslint.config.js", "tsup.config.ts"]
+  "include": ["src", "test", "eslint.config.js", "tsup.config.ts", "vitest.config.ts"]
 }

@@ -11,6 +11,7 @@ export interface RpcConnectionOptions {
   onNotification(notification: { method: string; params?: unknown }): void;
   onServerRequest(request: { id: number; method: string; params?: unknown }): Promise<unknown>;
   onServerRequestError(error: unknown): void;
+  onClose(error: AppServerError): void;
 }
 
 export interface RpcConnection {
@@ -41,15 +42,17 @@ export function createRpcConnection(child: ChildProcessWithoutNullStreams, optio
     closed = true;
     for (const request of pending.values()) request.reject(error);
     pending.clear();
+    options.onClose(error);
   }
 
   async function handleServerRequest(message: Required<Pick<RpcMessage, "id" | "method">> & RpcMessage): Promise<void> {
     try {
       const result = await options.onServerRequest({ id: message.id, method: message.method, ...(message.params === undefined ? {} : { params: message.params }) });
-      write({ id: message.id, result });
+      if (!closed) write({ id: message.id, result });
     } catch (error) {
-      options.onServerRequestError(error);
-      write({ id: message.id, error: { code: -32603, message: safeMessage(error) } });
+      try { options.onServerRequestError(error); }
+      catch { /* A host callback cannot escape the protocol dispatcher. */ }
+      if (!closed) write({ id: message.id, error: { code: -32603, message: safeMessage(error) } });
     }
   }
 
@@ -58,12 +61,13 @@ export function createRpcConnection(child: ChildProcessWithoutNullStreams, optio
       const request = pending.get(message.id);
       if (request === undefined) return;
       pending.delete(message.id);
-      if (message.error !== undefined) request.reject(new AppServerRpcError(message.error.code, redact(message.error.message), request.method));
+      if (message.error !== undefined) request.reject(new AppServerRpcError(message.error.code, redact(message.error.message).slice(0, 1_024), request.method));
       else request.resolve(message.result);
       return;
     }
     if (message.id !== undefined && message.method !== undefined) {
-      void handleServerRequest(message as Required<Pick<RpcMessage, "id" | "method">> & RpcMessage);
+      void handleServerRequest(message as Required<Pick<RpcMessage, "id" | "method">> & RpcMessage)
+        .catch((error: unknown) => { if (!closed) close(new AppServerError(`Codex server request reply failed: ${safeMessage(error)}`)); });
       return;
     }
     if (message.method !== undefined) options.onNotification({ method: message.method, ...(message.params === undefined ? {} : { params: message.params }) });

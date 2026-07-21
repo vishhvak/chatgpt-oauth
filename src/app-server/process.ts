@@ -1,8 +1,8 @@
 /** Spawns an isolated Codex app-server and owns its process-group teardown. */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { delimiter, join } from "node:path";
-import { tmpdir } from "node:os";
+import { access, chmod, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { basename, delimiter, dirname, join, relative, resolve, sep } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { constants as fsConstants } from "node:fs";
 import { AppServerError } from "./errors.js";
 
@@ -57,9 +57,59 @@ function waitForExit(child: ChildProcessWithoutNullStreams, timeoutMs: number): 
   });
 }
 
+function isWithin(path: string, parent: string): boolean {
+  const remainder = relative(parent, path);
+  return remainder === "" || (!remainder.startsWith(`..${sep}`) && remainder !== "..");
+}
+
+async function assertIsolatedHome(codexHome: string): Promise<void> {
+  const userCodexHome = resolve(homedir(), ".codex");
+  if (isWithin(resolve(codexHome), userCodexHome)) {
+    throw new AppServerError("codexHome must not use the user's real ~/.codex directory.");
+  }
+  async function resolveThroughExistingAncestor(path: string): Promise<string> {
+    let cursor = resolve(path);
+    const missing: string[] = [];
+    for (;;) {
+      try { return resolve(await realpath(cursor), ...missing); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        const parent = dirname(cursor);
+        if (parent === cursor) throw error;
+        missing.unshift(basename(cursor));
+        cursor = parent;
+      }
+    }
+  }
+  const [candidate, actualUserHome] = await Promise.all([
+    resolveThroughExistingAncestor(codexHome),
+    resolveThroughExistingAncestor(userCodexHome),
+  ]);
+  if (isWithin(candidate, actualUserHome)) {
+    throw new AppServerError("codexHome must not resolve into the user's real ~/.codex directory.");
+  }
+}
+
+async function killProcessTree(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.pid === undefined) return;
+  if (process.platform === "win32") {
+    await new Promise<void>((resolveKill) => {
+      const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+      killer.once("error", () => { child.kill("SIGKILL"); resolveKill(); });
+      killer.once("exit", () => { resolveKill(); });
+    });
+    return;
+  }
+  try { process.kill(-child.pid, "SIGKILL"); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") child.kill("SIGKILL");
+  }
+}
+
 export async function spawnAppServer(options: AppServerProcessOptions): Promise<AppServerProcess> {
   const temporaryHome = options.codexHome === undefined;
   const codexHome = options.codexHome ?? await mkdtemp(join(tmpdir(), "chatgpt-oauth-codex-"));
+  await assertIsolatedHome(codexHome);
   await mkdir(codexHome, { recursive: true, mode: 0o700 });
   await chmod(codexHome, 0o700);
   const binary = await resolveBinary(options.codexBin);
@@ -76,16 +126,10 @@ export async function spawnAppServer(options: AppServerProcessOptions): Promise<
     if (closed) return;
     closed = true;
     child.stdin.end();
-    if (!await waitForExit(child, 1_000)) {
-      // Killing the detached group prevents a fake/real app-server grandchild from surviving.
-      try {
-        if (process.platform === "win32" || child.pid === undefined) child.kill("SIGKILL");
-        else process.kill(-child.pid, "SIGKILL");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") child.kill("SIGKILL");
-      }
-      await waitForExit(child, 1_000);
-    }
+    await waitForExit(child, 1_000);
+    // Kill the detached group even if its leader exited during grace; descendants may remain.
+    await killProcessTree(child);
+    await waitForExit(child, 1_000);
     if (temporaryHome) await rm(codexHome, { recursive: true, force: true });
   }
 

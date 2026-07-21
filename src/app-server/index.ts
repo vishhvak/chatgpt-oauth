@@ -3,6 +3,7 @@
  * stamped "UNSTABLE - FOR OPENAI INTERNAL USE ONLY" and may change without notice.
  */
 import { ChatGPTOAuthError, type AuthSession, type ResponseEvent, type ResponseRequest, type ResponseResult, type SubscriptionAI } from "../core/types.js";
+import { extractUnverifiedClaims } from "../core/jwt.js";
 import { redact } from "../core/redact.js";
 import { AppServerError } from "./errors.js";
 import { spawnAppServer } from "./process.js";
@@ -80,9 +81,11 @@ function userInput(input: ResponseRequest["input"]): Array<Record<string, unknow
   return result;
 }
 
-function tokenMetadata(status: Awaited<ReturnType<AuthSession["status"]>>): { chatgptAccountId: string; chatgptPlanType: string | null } {
-  if (status?.accountId === undefined) throw new AppServerError("Codex app-server auth requires chatgptAccountId routing metadata.");
-  return { chatgptAccountId: status.accountId, chatgptPlanType: status.planType ?? null };
+function tokenMetadata(accessToken: string, status: Awaited<ReturnType<AuthSession["status"]>>): { chatgptAccountId: string; chatgptPlanType: string | null } {
+  const claims = extractUnverifiedClaims(undefined, accessToken);
+  const accountId = claims.accountId ?? status?.accountId;
+  if (accountId === undefined) throw new AppServerError("Codex app-server auth requires chatgptAccountId routing metadata.");
+  return { chatgptAccountId: accountId, chatgptPlanType: claims.planType ?? status?.planType ?? null };
 }
 
 /**
@@ -97,20 +100,45 @@ export async function createAppServerClient(
   const processHandle = await spawnAppServer(options);
   let threadId: string | undefined;
   let threadPromise: Promise<string> | undefined;
-  let active: { queue: EventQueue; threadId: string; turnId?: string } | undefined;
+  let threadInstructions: string | undefined;
+  interface ActiveTurn {
+    queue: EventQueue;
+    threadId: string;
+    turnId?: string;
+    failed: boolean;
+    pending: Array<{ method: string; params?: unknown }>;
+    release(): void;
+  }
+  let active: ActiveTurn | undefined;
+  let turnFence = Promise.resolve();
+
+  function finishTurn(expected: ActiveTurn): void {
+    if (active !== expected) return;
+    active = undefined;
+    expected.release();
+  }
+
+  function bindTurnId(expected: ActiveTurn, id: string): void {
+    if (expected.turnId !== undefined) return;
+    expected.turnId = id;
+    const pending = expected.pending.splice(0);
+    for (const notification of pending) handleNotification(notification);
+  }
 
   function handleNotification(notification: { method: string; params?: unknown }): void {
     const params = notification.params !== null && typeof notification.params === "object"
       ? notification.params as Record<string, unknown>
       : {};
     if (active !== undefined && notification.method === "turn/started") {
+      if (params.threadId !== active.threadId) return;
       const turn = params.turn;
       const id = turn !== null && typeof turn === "object" ? (turn as Record<string, unknown>).id : undefined;
-      if (typeof id === "string") active.turnId = id;
+      if (typeof id === "string") bindTurnId(active, id);
       return;
     }
     if (active !== undefined && notification.method === "item/agentMessage/delta" && params.threadId === active.threadId) {
-      if (active.turnId !== undefined && params.turnId !== active.turnId) return;
+      if (active.turnId === undefined) { active.pending.push(notification); return; }
+      if (params.turnId !== active.turnId || active.failed) return;
       if (typeof params.delta === "string") {
         active.queue.push({ type: "response.output_text.delta", data: { type: "response.output_text.delta", delta: params.delta }, delta: params.delta });
       }
@@ -120,17 +148,23 @@ export async function createAppServerClient(
       const turn = params.turn;
       if (turn === null || typeof turn !== "object") return;
       const record = turn as Record<string, unknown>;
-      if (active.turnId !== undefined && record.id !== active.turnId) return;
-      if (record.status === "failed" || record.status === "interrupted") {
+      if (active.turnId === undefined) { active.pending.push(notification); return; }
+      if (record.id !== active.turnId) return;
+      const completed = active;
+      if (completed.failed) {
+        finishTurn(completed);
+      } else if (record.status === "failed" || record.status === "interrupted") {
         active.queue.fail(new AppServerError(`Codex turn ${String(record.status)}: ${redact(JSON.stringify(record.error ?? "unknown")).slice(0, 1_024)}`));
+        finishTurn(completed);
       } else {
         active.queue.push({ type: "response.completed", data: params });
         active.queue.end();
+        finishTurn(completed);
       }
-      active = undefined;
       return;
     }
-    options.onNotification?.(notification);
+    try { options.onNotification?.(notification); }
+    catch { /* Consumer notification hooks must not break protocol dispatch. */ }
   }
 
   const rpc: RpcConnection = createRpcConnection(processHandle.child, {
@@ -139,18 +173,27 @@ export async function createAppServerClient(
       if (request.method !== "account/chatgptAuthTokens/refresh") throw new AppServerError(`Unsupported server request: ${request.method}`);
       try {
         const accessToken = await auth.refreshAccessToken(subject);
-        return { accessToken, ...tokenMetadata(await auth.status(subject)) };
+        return { accessToken, ...tokenMetadata(accessToken, await auth.status(subject)) };
       } catch (error) {
         const failure = typedFailure(error, "Codex token refresh failed");
-        active?.queue.fail(failure);
-        active = undefined;
+        if (active !== undefined) {
+          active.failed = true;
+          active.queue.fail(failure);
+        }
         throw failure;
       }
     },
     onServerRequestError(error) {
-      if (active !== undefined) {
+      if (active !== undefined && !active.failed) {
+        active.failed = true;
         active.queue.fail(typedFailure(error, "Codex server request failed"));
-        active = undefined;
+      }
+    },
+    onClose(error) {
+      if (active !== undefined) {
+        const closing = active;
+        closing.queue.fail(error);
+        finishTurn(closing);
       }
     },
   });
@@ -161,7 +204,10 @@ export async function createAppServerClient(
     });
     rpc.notify("initialized");
     const accessToken = await auth.getAccessToken(subject);
-    await rpc.request("account/login/start", { type: "chatgptAuthTokens", accessToken, ...tokenMetadata(await auth.status(subject)) });
+    const login = await rpc.request<{ type?: unknown }>("account/login/start", {
+      type: "chatgptAuthTokens", accessToken, ...tokenMetadata(accessToken, await auth.status(subject)),
+    });
+    if (login.type !== "chatgptAuthTokens") throw new AppServerError("Codex account/login/start returned an unexpected auth mode.");
   } catch (error) {
     rpc.close();
     await processHandle.close();
@@ -169,7 +215,11 @@ export async function createAppServerClient(
   }
 
   function ensureThread(req: ResponseRequest): Promise<string> {
+    if (threadPromise !== undefined && req.instructions !== threadInstructions) {
+      return Promise.reject(new AppServerError("A single app-server client cannot change instructions after its thread starts."));
+    }
     if (threadId !== undefined) return Promise.resolve(threadId);
+    threadInstructions = req.instructions;
     threadPromise ??= rpc.request<ThreadStartResult>("thread/start", {
       model: req.model,
       ...(req.instructions === undefined ? {} : { baseInstructions: req.instructions }),
@@ -184,9 +234,13 @@ export async function createAppServerClient(
 
   async function* stream(req: ResponseRequest): AsyncIterable<ResponseEvent> {
     const currentThread = await ensureThread(req);
+    if (active?.failed === true) await turnFence;
     if (active !== undefined) throw new AppServerError("Codex app-server supports one active turn per client.");
     const queue = createEventQueue();
-    active = { queue, threadId: currentThread };
+    let release: () => void = () => undefined;
+    turnFence = new Promise<void>((resolve) => { release = resolve; });
+    const current: ActiveTurn = { queue, threadId: currentThread, failed: false, pending: [], release };
+    active = current;
     try {
       const result = await rpc.request<TurnStartResult>("turn/start", {
         threadId: currentThread,
@@ -194,11 +248,11 @@ export async function createAppServerClient(
         model: req.model,
         ...(typeof req.reasoning?.effort === "string" ? { effort: req.reasoning.effort } : {}),
       });
-      if (active !== undefined && typeof result.turn?.id === "string") active.turnId ??= result.turn.id;
+      if (active === current && typeof result.turn?.id === "string") bindTurnId(current, result.turn.id);
     } catch (error) {
       const failure = typedFailure(error, "Codex turn/start failed");
-      active?.queue.fail(failure);
-      active = undefined;
+      current.queue.fail(failure);
+      finishTurn(current);
     }
     yield* queue.iterable;
   }
@@ -220,8 +274,11 @@ export async function createAppServerClient(
     stream,
     async close() {
       const failure = new AppServerError("Codex app-server client closed.");
-      active?.queue.fail(failure);
-      active = undefined;
+      if (active !== undefined) {
+        const closing = active;
+        closing.queue.fail(failure);
+        finishTurn(closing);
+      }
       rpc.close(failure);
       await processHandle.close();
     },

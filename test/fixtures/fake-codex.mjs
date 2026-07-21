@@ -9,6 +9,7 @@ const pidFile = process.env.FAKE_PID_FILE;
 let initialized = false;
 let buffer = "";
 let overloadAttempts = 0;
+let turnCount = 0;
 
 if (process.argv.slice(2).join("|") !== 'app-server|-c|cli_auth_credentials_store="ephemeral"') {
   process.stderr.write("unexpected invocation");
@@ -24,7 +25,7 @@ if (envFile !== undefined) {
   }));
 }
 
-if (scenario === "teardown") {
+if (scenario === "teardown" || scenario === "teardown-leader-exit") {
   const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
   if (pidFile !== undefined) writeFileSync(pidFile, JSON.stringify({ parent: process.pid, grandchild: grandchild.pid }));
   process.on("SIGTERM", () => undefined);
@@ -35,25 +36,25 @@ function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
-function completed(status = "completed", error = null) {
+function completed(turnId, status = "completed", error = null) {
   send({ method: "turn/completed", params: {
     threadId: "thread-1",
-    turn: { id: "turn-1", status, error },
+    turn: { id: turnId, status, error },
   } });
 }
 
-function finishTurn(text = "hello") {
-  send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
-  send({ method: "item/started", params: { threadId: "thread-1", turnId: "turn-1", item: { id: "item-1" } } });
-  send({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", delta: text } });
-  send({ method: "item/completed", params: { threadId: "thread-1", turnId: "turn-1", item: { id: "item-1" } } });
-  completed();
+function finishTurn(turnId, text = "hello") {
+  send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: turnId, status: "inProgress" } } });
+  send({ method: "item/started", params: { threadId: "thread-1", turnId, item: { id: "item-1" } } });
+  send({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId, itemId: "item-1", delta: text } });
+  send({ method: "item/completed", params: { threadId: "thread-1", turnId, item: { id: "item-1" } } });
+  completed(turnId);
 }
 
 function handle(message) {
   if (message.id === 900 && message.method === undefined) {
-    if (scenario === "refresh" && message.result?.accessToken === "access-fresh") finishTurn("fresh answer");
-    if (scenario === "refresh-error" && message.error !== undefined) completed("failed", { message: "external refresh failed" });
+    if (scenario === "refresh" && message.result?.accessToken === "access-fresh") finishTurn("turn-1", "fresh answer");
+    if (scenario === "refresh-error" && message.error !== undefined) completed("turn-1", "failed", { message: "external refresh failed" });
     return;
   }
   if (message.method === "initialize") {
@@ -75,7 +76,7 @@ function handle(message) {
   if (message.method === "thread/start") {
     if (scenario === "overloaded") {
       overloadAttempts += 1;
-      send({ id: message.id, error: { code: -32001, message: `overloaded-${overloadAttempts}` } });
+      send({ id: message.id, error: { code: -32001, message: `overloaded-${overloadAttempts} {"accessToken":"secret-overload"}` } });
       return;
     }
     send({ id: message.id, result: { thread: { id: "thread-1" }, model: message.params?.model } });
@@ -83,10 +84,12 @@ function handle(message) {
     return;
   }
   if (message.method === "turn/start") {
-    send({ id: message.id, result: { turn: { id: "turn-1", status: "inProgress" } } });
-    if (scenario === "refresh" || scenario === "refresh-error") {
+    turnCount += 1;
+    const turnId = `turn-${turnCount}`;
+    send({ id: message.id, result: { turn: { id: turnId, status: "inProgress" } } });
+    if ((scenario === "refresh" || scenario === "refresh-error") && turnCount === 1) {
       send({ id: 900, method: "account/chatgptAuthTokens/refresh", params: { reason: "unauthorized", previousAccountId: "account-old" } });
-    } else finishTurn();
+    } else finishTurn(turnId, scenario === "refresh-error" ? "second answer" : "hello");
     return;
   }
   if (message.id !== undefined) send({ id: message.id, error: { code: -32601, message: "method not found" } });
@@ -105,5 +108,6 @@ process.stdin.on("data", (chunk) => {
 });
 
 process.stdin.on("end", () => {
+  if (scenario === "teardown-leader-exit") process.exit(0);
   if (scenario !== "teardown") process.exitCode = 0;
 });

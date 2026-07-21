@@ -4,9 +4,9 @@ const REDACTED = "[REDACTED]";
 export function redact(value: string): string {
   return value
     .replace(/\bBearer\s+[^\s,;"']+/giu, `Bearer ${REDACTED}`)
-    .replace(/("(?:access_token|refresh_token|id_token|authorization)"\s*:\s*")((?:\\.|[^"\\])*(?:\\(?=$))?)("|$)/giu, `$1${REDACTED}$3`)
-    .replace(/('(?:access_token|refresh_token|id_token|authorization)'\s*:\s*')((?:\\.|[^'\\])*(?:\\(?=$))?)('|$)/giu, `$1${REDACTED}$3`)
-    .replace(/\b(access_token|refresh_token|id_token|authorization)=([^&\s]+)/giu, `$1=${REDACTED}`);
+    .replace(/("(?:access_?token|refresh_?token|id_?token|authorization)"\s*:\s*")((?:\\.|[^"\\])*(?:\\(?=$))?)("|$)/giu, `$1${REDACTED}$3`)
+    .replace(/('(?:access_?token|refresh_?token|id_?token|authorization)'\s*:\s*')((?:\\.|[^'\\])*(?:\\(?=$))?)('|$)/giu, `$1${REDACTED}$3`)
+    .replace(/\b(access_?token|refresh_?token|id_?token|authorization)=([^&\s]+)/giu, `$1=${REDACTED}`);
 }
 
 export async function readRedactedResponse(response: Response, readLimit = 4_096): Promise<string> {

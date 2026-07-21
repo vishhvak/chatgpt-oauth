@@ -15,7 +15,7 @@ const terminal = createInterface({ input: stdin, output: stdout });
 let ai: Awaited<ReturnType<typeof createAppServerClient>> | undefined;
 
 try {
-  if (await auth.status(subject) === null) {
+  if ((await auth.status(subject))?.status !== "connected") {
     const pending = await auth.beginLogin();
     console.log(`Open this URL in your browser:\n${pending.url}\n`);
     const callback = await waitForLoopbackCallback(pending);

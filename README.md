@@ -48,6 +48,13 @@ const result = await ai.respond({ model: "gpt-5.4-mini", input: "Explain CAS in 
 console.log(result.outputText);
 ```
 
+Run the complete streaming examples without adding a runtime dependency to your app:
+
+```sh
+pnpm dlx tsx examples/node-cli/index.ts
+pnpm dlx tsx examples/node-cli/app-server.ts
+```
+
 The file store creates a `0700` directory, a `0600` AES-256-GCM key, and an atomically replaced `0600` encrypted credential file. Set `CHATGPT_OAUTH_KEY` to a base64/base64url or 64-character hex value encoding exactly 32 bytes to manage the key externally.
 
 ## Next.js / hosted web quickstart
@@ -128,8 +135,9 @@ Run auth in the main process and send only safe status/output over IPC:
 import { shell } from "electron";
 
 const pending = await auth.beginLogin();
+const callbackPromise = waitForLoopbackCallback(pending);
 await shell.openExternal(pending.url);
-const callback = await waitForLoopbackCallback(pending);
+const callback = await callbackPromise;
 await auth.completeLogin(mainProcessSession.userId, callback, pending);
 ```
 

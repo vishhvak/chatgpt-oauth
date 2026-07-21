@@ -1,6 +1,6 @@
 /** Pins the six experimental app-server transport invariants with a scripted child process. */
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -36,8 +36,8 @@ async function workspace(): Promise<{ directory: string; codexHome: string; wire
 }
 
 async function closeAndRemove(client: AppServerClient | undefined, directory: string): Promise<void> {
-  await client?.close();
-  await rm(directory, { recursive: true, force: true });
+  try { await client?.close(); }
+  finally { await rm(directory, { recursive: true, force: true }); }
 }
 
 function alive(pid: number): boolean {
@@ -98,6 +98,7 @@ describe("app-server invariants", () => {
       });
       await expect(client.respond({ model: "gpt-test", input: "hello" })).resolves.toMatchObject({ outputText: "fresh answer" });
       expect(refresh).toHaveBeenCalledOnce();
+      expect(refresh).toHaveBeenCalledWith(subject);
       const messages = (await readFile(work.wireFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
       expect(messages).toContainEqual({ id: 900, result: {
         accessToken: "access-fresh", chatgptAccountId: "account-fresh", chatgptPlanType: "plus",
@@ -117,6 +118,7 @@ describe("app-server invariants", () => {
       });
       await expect(client.respond({ model: "gpt-test", input: "hello" })).rejects.toMatchObject({ code: "token_refresh" });
       expect(refresh).toHaveBeenCalledOnce();
+      await expect(client.respond({ model: "gpt-test", input: "again" })).resolves.toMatchObject({ outputText: "second answer" });
       const messages = (await readFile(work.wireFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
       expect(messages.filter((message) => message.id === 900)).toHaveLength(1);
       expect(messages.find((message) => message.id === 900)).toHaveProperty("error");
@@ -131,7 +133,7 @@ describe("app-server invariants", () => {
       client = await createAppServerClient(authSession(), subject, {
         codexBin: fakeCodex,
         codexHome: work.codexHome,
-        env: { FAKE_CODEX_SCENARIO: "teardown", FAKE_PID_FILE: pidFile },
+        env: { FAKE_CODEX_SCENARIO: "teardown-leader-exit", FAKE_PID_FILE: pidFile },
       });
       const pids = JSON.parse(await readFile(pidFile, "utf8")) as { parent: number; grandchild: number };
       await client.close();
@@ -151,7 +153,10 @@ describe("app-server invariants", () => {
         codexHome: work.codexHome,
         env: { FAKE_CODEX_SCENARIO: "overloaded", FAKE_WIRE_FILE: work.wireFile },
       });
-      await expect(client.respond({ model: "gpt-test", input: "hello" })).rejects.toBeInstanceOf(AppServerRpcError);
+      const failure = await client.respond({ model: "gpt-test", input: "hello" }).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(AppServerRpcError);
+      expect((failure as Error).message).toContain("[REDACTED]");
+      expect((failure as Error).message).not.toContain("secret-overload");
       const messages = (await readFile(work.wireFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
       expect(messages.filter((message) => message.method === "thread/start")).toHaveLength(4);
     } finally { await closeAndRemove(client, work.directory); }
@@ -164,6 +169,10 @@ describe("app-server invariants", () => {
     process.env.GITHUB_TOKEN = "poison-secret";
     let client: AppServerClient | undefined;
     try {
+      await expect(createAppServerClient(authSession(), subject, {
+        codexBin: fakeCodex,
+        codexHome: join(homedir(), ".codex"),
+      })).rejects.toThrow("must not use the user's real ~/.codex");
       client = await createAppServerClient(authSession(), subject, {
         codexBin: fakeCodex,
         codexHome: work.codexHome,
@@ -174,6 +183,12 @@ describe("app-server invariants", () => {
       expect(observed.codexHome).toBe(work.codexHome);
       expect(observed.argv).toEqual(["app-server", "-c", 'cli_auth_credentials_store="ephemeral"']);
       expect(observed.keys).not.toContain("GITHUB_TOKEN");
+      const explicit = new Set(["CODEX_HOME", "FAKE_CODEX_SCENARIO", "FAKE_ENV_FILE"]);
+      // macOS injects this locale hint into child processes even when it is absent from spawn env.
+      const systemInjected = new Set(["__CF_USER_TEXT_ENCODING"]);
+      const inherited = Object.keys(process.env).filter((key) => ["PATH", "HOME", "TMPDIR", "LANG"].includes(key) || key.startsWith("LC_"));
+      expect(observed.keys.filter((key) => !explicit.has(key) && !systemInjected.has(key) && !inherited.includes(key))).toEqual([]);
+      expect((await stat(work.codexHome)).mode & 0o777).toBe(0o700);
     } finally {
       if (previous === undefined) delete process.env.GITHUB_TOKEN;
       else process.env.GITHUB_TOKEN = previous;

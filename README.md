@@ -181,6 +181,12 @@ try {
 
 Each client uses an isolated `CODEX_HOME`; the child receives a minimal environment and ephemeral credential-store configuration. See `examples/node-cli/app-server.ts` for the runnable login-to-stream flow.
 
+## Deploy
+
+[`examples/render-service`](examples/render-service/README.md) is a copy-and-own template that packages OAuth, a subject-keyed PostgreSQL store, and the Codex binary into one deployable. There is no separate app-server URL.
+
+A Codex child process is bound to exactly one server-derived application subject for its entire life. Reuse it only for that subject, close it on logout or idle eviction, and never turn the example into a shared process/token pool or subscription broker. See the [deployment guide](docs/DEPLOY.md) for the lifecycle rule and provider setup.
+
 ## Streaming
 
 ```ts

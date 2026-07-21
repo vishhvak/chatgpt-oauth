@@ -1,0 +1,8 @@
+node_modules
+dist
+examples/render-service/dist
+.git
+.env
+coverage
+SPEC.md
+HANDOFF.md

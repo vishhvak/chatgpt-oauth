@@ -7,6 +7,8 @@ import {
   RateLimitError,
   TransportError,
   type AuthSession,
+  type RateLimitSnapshot,
+  type RateLimitWindow,
   type ResponseEvent,
   type ResponseRequest,
   type ResponseResult,
@@ -17,6 +19,37 @@ export interface ClientOptions {
   fetch?: typeof fetch;
   protocol?: ProtocolOverrides;
   sessionId?: string;
+  onRateLimits?: (snapshot: RateLimitSnapshot) => void;
+}
+
+export type BackendApiClient = SubscriptionAI & { readonly lastRateLimits: RateLimitSnapshot | undefined };
+
+function finiteHeader(headers: Headers, name: string): number | undefined {
+  const value = headers.get(name);
+  if (value === null || value.trim() === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function rateLimitWindow(headers: Headers, prefix: "primary" | "secondary"): RateLimitWindow | undefined {
+  const usedPercent = finiteHeader(headers, `x-codex-${prefix}-used-percent`);
+  if (usedPercent === undefined) return undefined;
+  const windowMinutes = finiteHeader(headers, `x-codex-${prefix}-window-minutes`);
+  const resetsAt = finiteHeader(headers, `x-codex-${prefix}-reset-at`);
+  return {
+    usedPercent,
+    ...(windowMinutes === undefined ? {} : { windowMinutes }),
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+  };
+}
+
+export function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot {
+  const primary = rateLimitWindow(headers, "primary");
+  const secondary = rateLimitWindow(headers, "secondary");
+  return {
+    ...(primary === undefined ? {} : { primary }),
+    ...(secondary === undefined ? {} : { secondary }),
+  };
 }
 
 function rateLimit(response: Response): RateLimitError {
@@ -28,10 +61,18 @@ function rateLimit(response: Response): RateLimitError {
   return new RateLimitError(Number.isNaN(date) ? undefined : Math.max(0, date - Date.now()));
 }
 
-export function createClient(session: AuthSession, subject: string, options: ClientOptions = {}): SubscriptionAI {
+export function createClient(session: AuthSession, subject: string, options: ClientOptions = {}): BackendApiClient {
   const request = options.fetch ?? fetch;
   const endpoint = options.protocol?.RESPONSES_URL ?? PROTOCOL.RESPONSES_URL;
   const sessionId = options.sessionId ?? crypto.randomUUID();
+  let lastRateLimits: RateLimitSnapshot | undefined;
+
+  function captureRateLimits(snapshot: RateLimitSnapshot): void {
+    lastRateLimits = snapshot;
+    // Consumer telemetry must never turn a successful model response into a failure.
+    try { options.onRateLimits?.(snapshot); }
+    catch { /* Deliberately isolated from transport success. */ }
+  }
 
   async function send(req: ResponseRequest, retried: boolean): Promise<Response> {
     const accessToken = retried
@@ -83,12 +124,16 @@ export function createClient(session: AuthSession, subject: string, options: Cli
 
   async function* stream(req: ResponseRequest): AsyncIterable<ResponseEvent> {
     const response = await send(req, false);
-    if (response.body === null) return;
+    const rateLimits = parseRateLimitHeaders(response.headers);
+    if (response.body === null) {
+      captureRateLimits(rateLimits);
+      return;
+    }
     try { yield* parseSSE(response.body); }
     catch (error) {
       const message = redact(error instanceof Error ? error.message : String(error)).slice(0, 1_024);
       throw new TransportError(`Subscription stream failed: ${message}`);
-    }
+    } finally { captureRateLimits(rateLimits); }
   }
 
   async function respond(req: ResponseRequest): Promise<ResponseResult> {
@@ -103,5 +148,5 @@ export function createClient(session: AuthSession, subject: string, options: Cli
     return { outputText, events, ...(completed === undefined ? {} : { response: completed }) };
   }
 
-  return { respond, stream };
+  return { respond, stream, get lastRateLimits() { return lastRateLimits; } };
 }

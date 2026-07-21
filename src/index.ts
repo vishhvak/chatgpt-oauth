@@ -9,7 +9,7 @@ export { createMemoryStore } from "./core/memory-store.js";
 export { createAuthSession } from "./core/lifecycle.js";
 export type { AuthSessionOptions } from "./core/lifecycle.js";
 export { createClient } from "./core/client.js";
-export type { ClientOptions } from "./core/client.js";
+export type { BackendApiClient, ClientOptions } from "./core/client.js";
 export { parseSSE } from "./core/sse.js";
 export {
   ChatGPTOAuthError,
@@ -27,6 +27,8 @@ export type {
   CredentialStore,
   DeviceLogin,
   PendingLogin,
+  RateLimitSnapshot,
+  RateLimitWindow,
   ResponseEvent,
   ResponseRequest,
   ResponseResult,

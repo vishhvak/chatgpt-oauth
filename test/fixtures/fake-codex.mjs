@@ -49,6 +49,13 @@ function finishTurn(turnId, text = "hello") {
   send({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId, itemId: "item-1", delta: text } });
   send({ method: "item/completed", params: { threadId: "thread-1", turnId, item: { id: "item-1" } } });
   completed(turnId);
+  if (scenario === "rate-limits") {
+    send({ method: "account/rateLimits/updated", params: { rateLimits: {
+      primary: { usedPercent: 26, windowDurationMins: 300, resetsAt: 1700007200 },
+      planType: "pro",
+      limitName: "Codex",
+    } } });
+  }
 }
 
 function handle(message) {
@@ -81,6 +88,15 @@ function handle(message) {
     }
     send({ id: message.id, result: { thread: { id: "thread-1" }, model: message.params?.model } });
     send({ method: "thread/started", params: { thread: { id: "thread-1" } } });
+    return;
+  }
+  if (message.method === "account/rateLimits/read") {
+    send({ id: message.id, result: { rateLimits: {
+      primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 1700003600 },
+      secondary: { usedPercent: 4, windowDurationMins: 10080, resetsAt: 1700604800 },
+      planType: "pro",
+      limitName: "Codex",
+    } } });
     return;
   }
   if (message.method === "turn/start") {

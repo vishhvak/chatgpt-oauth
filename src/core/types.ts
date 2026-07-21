@@ -85,6 +85,20 @@ export interface ResponseResult {
   response?: unknown;
 }
 
+export interface RateLimitWindow {
+  usedPercent: number;
+  windowMinutes?: number;
+  /** Epoch seconds. */
+  resetsAt?: number;
+}
+
+export interface RateLimitSnapshot {
+  primary?: RateLimitWindow;
+  secondary?: RateLimitWindow;
+  planType?: string;
+  limitName?: string;
+}
+
 export interface SubscriptionAI {
   respond(req: ResponseRequest): Promise<ResponseResult>;
   stream(req: ResponseRequest): AsyncIterable<ResponseEvent>;

@@ -38,7 +38,7 @@ function tokenResponse(overrides: Record<string, unknown> = {}): Response {
   return Response.json({ access_token: "access-new", refresh_token: "refresh-new", expires_in: 3_600, ...overrides });
 }
 
-function streamResponse(parts: string[], status = 200): Response {
+function streamResponse(parts: string[], status = 200, headers: HeadersInit = {}): Response {
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -46,7 +46,7 @@ function streamResponse(parts: string[], status = 200): Response {
       controller.close();
     },
   });
-  return new Response(body, { status, headers: { "content-type": "text/event-stream" } });
+  return new Response(body, { status, headers: { "content-type": "text/event-stream", ...headers } });
 }
 
 function fakeSession(overrides: Partial<AuthSession> = {}): AuthSession {
@@ -313,5 +313,39 @@ describe("v1 invariants", () => {
     await expect(device.wait()).resolves.toMatchObject({ accessToken: "access-new" });
     expect(sleeps).toEqual([1_000, 1_000, 1_000, 6_000]);
     expect(polls).toBe(4);
+  });
+
+  it("13. exposes complete, partial, and missing backend rate-limit headers safely", async () => {
+    const observed = vi.fn();
+    const responses = [
+      streamResponse(["data: [DONE]\n\n"], 200, {
+        "x-codex-primary-used-percent": "25.5",
+        "x-codex-primary-window-minutes": "300",
+        "x-codex-primary-reset-at": "1700003600",
+        "x-codex-secondary-used-percent": "4",
+        "x-codex-secondary-window-minutes": "10080",
+        "x-codex-secondary-reset-at": "1700604800",
+      }),
+      streamResponse(["data: [DONE]\n\n"], 200, {
+        "x-codex-primary-used-percent": "not-a-number",
+        "x-codex-secondary-used-percent": "9",
+      }),
+      streamResponse(["data: [DONE]\n\n"]),
+    ];
+    const client = createClient(fakeSession(), subject, {
+      fetch: vi.fn(async () => responses.shift() as Response) as unknown as typeof fetch,
+      onRateLimits: observed,
+    });
+
+    await client.respond({ model: "gpt-test", input: "one" });
+    expect(client.lastRateLimits).toEqual({
+      primary: { usedPercent: 25.5, windowMinutes: 300, resetsAt: 1700003600 },
+      secondary: { usedPercent: 4, windowMinutes: 10080, resetsAt: 1700604800 },
+    });
+    await client.respond({ model: "gpt-test", input: "two" });
+    expect(client.lastRateLimits).toEqual({ secondary: { usedPercent: 9 } });
+    await client.respond({ model: "gpt-test", input: "three" });
+    expect(client.lastRateLimits).toEqual({});
+    expect(observed).toHaveBeenCalledTimes(3);
   });
 });

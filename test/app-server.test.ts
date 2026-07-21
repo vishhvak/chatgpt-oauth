@@ -195,4 +195,34 @@ describe("app-server invariants", () => {
       await closeAndRemove(client, work.directory);
     }
   });
+
+  it("19. maps rate-limit reads and publishes turn notifications", async () => {
+    const work = await workspace();
+    const onRateLimits = vi.fn();
+    let client: AppServerClient | undefined;
+    try {
+      client = await createAppServerClient(authSession(), subject, {
+        codexBin: fakeCodex,
+        codexHome: work.codexHome,
+        env: { FAKE_CODEX_SCENARIO: "rate-limits", FAKE_WIRE_FILE: work.wireFile },
+        onRateLimits,
+      });
+      await expect(client.getRateLimits()).resolves.toEqual({
+        primary: { usedPercent: 25, windowMinutes: 300, resetsAt: 1700003600 },
+        secondary: { usedPercent: 4, windowMinutes: 10080, resetsAt: 1700604800 },
+        planType: "pro",
+        limitName: "Codex",
+      });
+      await expect(client.respond({ model: "gpt-test", input: "hello" })).resolves.toMatchObject({ outputText: "hello" });
+      await vi.waitFor(() => { expect(onRateLimits).toHaveBeenCalledTimes(2); });
+      expect(onRateLimits).toHaveBeenLastCalledWith({
+        primary: { usedPercent: 26, windowMinutes: 300, resetsAt: 1700007200 },
+        planType: "pro",
+        limitName: "Codex",
+      });
+      const messages = (await readFile(work.wireFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(messages).toContainEqual(expect.objectContaining({ method: "account/rateLimits/read" }));
+      expect(messages.find((message) => message.method === "account/rateLimits/read")).not.toHaveProperty("params");
+    } finally { await closeAndRemove(client, work.directory); }
+  });
 });

@@ -7,6 +7,7 @@ function fakeClient(label: string): AppServerClient {
   return {
     async respond() { return { outputText: label, events: [] }; },
     async *stream() { yield { type: "test", data: label }; },
+    async getRateLimits() { return { primary: { usedPercent: 25 } }; },
     close: vi.fn(async () => undefined),
   };
 }

@@ -2,7 +2,7 @@
  * Experimental Codex app-server transport. The required `chatgptAuthTokens` mode is
  * stamped "UNSTABLE - FOR OPENAI INTERNAL USE ONLY" and may change without notice.
  */
-import { ChatGPTOAuthError, type AuthSession, type ResponseEvent, type ResponseRequest, type ResponseResult, type SubscriptionAI } from "../core/types.js";
+import { ChatGPTOAuthError, type AuthSession, type RateLimitSnapshot, type RateLimitWindow, type ResponseEvent, type ResponseRequest, type ResponseResult, type SubscriptionAI } from "../core/types.js";
 import { extractUnverifiedClaims } from "../core/jwt.js";
 import { redact } from "../core/redact.js";
 import { AppServerError } from "./errors.js";
@@ -16,12 +16,53 @@ export interface AppServerClientOptions {
   codexHome?: string;
   env?: Record<string, string>;
   onNotification?: (notification: unknown) => void;
+  onRateLimits?: (snapshot: RateLimitSnapshot) => void;
 }
 
-export type AppServerClient = SubscriptionAI & { close(): Promise<void> };
+export type AppServerClient = SubscriptionAI & {
+  getRateLimits(): Promise<RateLimitSnapshot>;
+  close(): Promise<void>;
+};
 
 interface ThreadStartResult { thread?: { id?: unknown } }
 interface TurnStartResult { turn?: { id?: unknown } }
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" ? value as Record<string, unknown> : undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function mapRateLimitWindow(value: unknown): RateLimitWindow | undefined {
+  const source = record(value);
+  if (source === undefined) return undefined;
+  const usedPercent = finiteNumber(source.usedPercent ?? source.used_percent);
+  if (usedPercent === undefined) return undefined;
+  const windowMinutes = finiteNumber(source.windowDurationMins ?? source.window_duration_mins);
+  const resetsAt = finiteNumber(source.resetsAt ?? source.resets_at);
+  return {
+    usedPercent,
+    ...(windowMinutes === undefined ? {} : { windowMinutes }),
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+  };
+}
+
+function mapRateLimits(value: unknown): RateLimitSnapshot {
+  const envelope = record(value) ?? {};
+  const source = record(envelope.rateLimits ?? envelope.rate_limits) ?? envelope;
+  const primary = mapRateLimitWindow(source.primary);
+  const secondary = mapRateLimitWindow(source.secondary);
+  const planType = source.planType ?? source.plan_type;
+  const limitName = source.limitName ?? source.limit_name;
+  return {
+    ...(primary === undefined ? {} : { primary }),
+    ...(secondary === undefined ? {} : { secondary }),
+    ...(typeof planType === "string" ? { planType } : {}),
+    ...(typeof limitName === "string" ? { limitName } : {}),
+  };
+}
 
 interface EventQueue {
   push(event: ResponseEvent): void;
@@ -112,6 +153,11 @@ export async function createAppServerClient(
   let active: ActiveTurn | undefined;
   let turnFence = Promise.resolve();
 
+  function publishRateLimits(snapshot: RateLimitSnapshot): void {
+    try { options.onRateLimits?.(snapshot); }
+    catch { /* Consumer telemetry must not break protocol dispatch. */ }
+  }
+
   function finishTurn(expected: ActiveTurn): void {
     if (active !== expected) return;
     active = undefined;
@@ -162,6 +208,9 @@ export async function createAppServerClient(
         finishTurn(completed);
       }
       return;
+    }
+    if (notification.method === "account/rateLimits/updated") {
+      publishRateLimits(mapRateLimits(params));
     }
     try { options.onNotification?.(notification); }
     catch { /* Consumer notification hooks must not break protocol dispatch. */ }
@@ -269,9 +318,16 @@ export async function createAppServerClient(
     return { outputText, events, ...(response === undefined ? {} : { response }) };
   }
 
+  async function getRateLimits(): Promise<RateLimitSnapshot> {
+    const snapshot = mapRateLimits(await rpc.request("account/rateLimits/read"));
+    publishRateLimits(snapshot);
+    return snapshot;
+  }
+
   return {
     respond,
     stream,
+    getRateLimits,
     async close() {
       const failure = new AppServerError("Codex app-server client closed.");
       if (active !== undefined) {

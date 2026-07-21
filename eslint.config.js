@@ -7,6 +7,10 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ["test/fixtures/*.mjs"],
+    languageOptions: { globals: globals.node },
+  },
+  {
     files: ["**/*.ts", "**/*.tsx"],
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
     rules: {

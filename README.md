@@ -5,7 +5,7 @@ Experimental, unofficial OAuth and subscription transport for JavaScript apps wh
 > [!WARNING]
 > This package rides the Codex CLI's public OAuth client and an undocumented ChatGPT backend API. It is not an official OpenAI SDK. OpenAI can change or disable the flow at any time. Treat refresh tokens like passwords, never pool tokens or resell subscription access, use this only for personal or self-hosted software unless OpenAI approves your exact use, and keep an API-key or local-model fallback.
 
-`chatgpt-oauth` has zero runtime dependencies, is ESM-only, and keeps platform-specific custody behind a subject-keyed store. Node 20+, browsers, React, React Native/Expo, Electron, and Tauri share the same lifecycle core. Native Swift and Kotlin ports can follow [PROTOCOL.md](./PROTOCOL.md) without reading TypeScript.
+`chatgpt-oauth` has zero runtime dependencies, is ESM-only, and keeps platform-specific custody behind a subject-keyed store. Node 20+, browsers, React, React Native/Expo, Electron, and Tauri share the same lifecycle core.
 
 ## The identity rule
 
@@ -178,10 +178,6 @@ Inference retries exactly once after a 401. `disabled()` is checked before netwo
 `logout(subject)` always deletes local credentials. There is no reliable public revoke endpoint for this client. Users can review sessions and sign out at [OpenAI account security](https://auth.openai.com/account).
 
 Keep an API-key or local-model transport ready. Do not silently downgrade between transports or identities.
-
-## Native ports
-
-[PROTOCOL.md](./PROTOCOL.md) defines every endpoint, parameter, claim path, state transition, retry rule, header, SSE frame, and security control for Swift/Kotlin implementations.
 
 ## License
 

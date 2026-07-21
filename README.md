@@ -50,9 +50,12 @@ console.log(result.outputText);
 
 Pass `onRateLimits` to observe the usage headers attached to each response, or read `ai.lastRateLimits` after a turn. The direct backend transport cannot fetch usage independently because its limits arrive only on response headers.
 
-Run the complete streaming examples without adding a runtime dependency to your app:
+The npm tarball contains compiled package code, not `examples/`. Clone the [GitHub repository](https://github.com/vishhvak/chatgpt-oauth) to run the complete streaming examples:
 
 ```sh
+git clone https://github.com/vishhvak/chatgpt-oauth.git
+cd chatgpt-oauth
+pnpm install
 pnpm dlx tsx examples/node-cli/index.ts
 pnpm dlx tsx examples/node-cli/app-server.ts
 ```
@@ -64,7 +67,18 @@ The file store creates a `0700` directory, a `0600` AES-256-GCM key, and an atom
 Keep `PendingLogin` and credentials on the server, keyed by the subject from your trusted session. The browser receives only the authorize URL and safe session metadata.
 
 ```ts
+// lib/chatgpt.ts — server-only module
+import { createAuthSession, type CredentialStore } from "chatgpt-oauth";
+
+const store: CredentialStore = await createApplicationCredentialStore();
+export const auth = createAuthSession({ store });
+```
+
+`createApplicationCredentialStore()` is your encrypted database adapter. It must implement `load(subject)`, atomic `compareAndSwap(subject, expectedVersion, next)`, and `delete(subject)`. Copy the [PostgreSQL CAS reference](https://github.com/vishhvak/chatgpt-oauth/blob/main/examples/render-service/src/postgres-store.ts) and replace its key/database wiring for your application.
+
+```ts
 // POST /api/chatgpt/login — server code
+import { auth } from "@/lib/chatgpt";
 import { createAuthorizationRedirect } from "chatgpt-oauth/web";
 
 const subject = requireAppSession(request).user.id; // server-derived
@@ -75,12 +89,24 @@ return Response.json({ url: pending.url });
 
 ```ts
 // GET /api/chatgpt/callback — server code
+import { auth } from "@/lib/chatgpt";
 import { completeAuthorizationRedirect } from "chatgpt-oauth/web";
 
 const subject = requireAppSession(request).user.id;
 const pending = await takeEncryptedPendingLogin(subject);
 await completeAuthorizationRedirect(auth, subject, request.url, pending);
 return Response.redirect("https://app.example/settings");
+```
+
+```ts
+// GET /api/chatgpt/session — server code
+import { auth } from "@/lib/chatgpt";
+
+const subject = requireAppSession(request).user.id;
+const session = await auth.status(subject);
+return Response.json(session === null
+  ? { status: "signed-out" }
+  : { status: "connected", email: session.email, planType: session.planType });
 ```
 
 ```tsx
@@ -96,6 +122,19 @@ import { SignInWithChatGPT } from "chatgpt-oauth/react";
 The zero-config shell injects one scoped stylesheet, opens login in a popup, and polls until the safe session metadata becomes connected. Use `mode="redirect"` when popups are unsuitable. The experimental ToS disclaimer is visible by default; set `showDisclaimer={false}` only when your host UI presents the warning elsewhere.
 
 Customize it with `label`, `theme="auto" | "light" | "dark"`, `className`, `style`, `onConnected`, and `onError`. Host CSS can override `--cgpt-bg`, `--cgpt-fg`, `--cgpt-border`, `--cgpt-radius`, `--cgpt-accent`, and `--cgpt-muted`. The `render={(auth) => ...}` prop remains the complete headless escape hatch. Your session route must return only `{ status, email?, planType? }`, never access or refresh tokens.
+
+`<ChatGPTUsage endpoints={{ usage: "/api/chatgpt/usage" }} />` treats that URL as an example: the usage GET route is application-owned, must derive its subject from the trusted server session, and must return a `RateLimitSnapshot` JSON object:
+
+```json
+{
+  "primary": { "usedPercent": 25, "windowMinutes": 300, "resetsAt": 1700003600 },
+  "secondary": { "usedPercent": 4, "windowMinutes": 10080, "resetsAt": 1700604800 },
+  "planType": "pro",
+  "limitName": "Codex"
+}
+```
+
+`primary`, `secondary`, `planType`, and `limitName` are optional; each window requires `usedPercent`, while `windowMinutes` and epoch-seconds `resetsAt` are optional. Return metadata only—never credentials.
 
 This component is web-only. React Native and native Swift/Kotlin apps should use the device flow and their platform-owned login UI rather than embedding this DOM component.
 
@@ -187,7 +226,7 @@ try {
 }
 ```
 
-Each client uses an isolated `CODEX_HOME`; the child receives a minimal environment and ephemeral credential-store configuration. See `examples/node-cli/app-server.ts` for the runnable login-to-stream flow.
+Each client uses an isolated `CODEX_HOME`; the child receives a minimal environment and ephemeral credential-store configuration. See the [app-server example on GitHub](https://github.com/vishhvak/chatgpt-oauth/blob/main/examples/node-cli/app-server.ts) for the runnable login-to-stream flow.
 
 ## Deploy
 
@@ -236,7 +275,7 @@ Every request streams. `respond()` uses the same stream and collects output-text
 
 - `useChatGPTAuth({ endpoints, mode? })` — `loading | signed-out | connecting | connected | error`
 - `<SignInWithChatGPT endpoints label? theme? showDisclaimer? mode? className? style? onConnected? onError? render? />`
-- `<ChatGPTUsage endpoints={{ usage }} theme? refreshIntervalMs? className? style? render? />` fetches a safe `RateLimitSnapshot` from an application-owned, subject-bound GET route.
+- `<ChatGPTUsage endpoints={{ usage }} theme? refreshIntervalMs? className? style? render? />` fetches a safe `RateLimitSnapshot` from the application-owned, subject-bound GET route at the supplied `usage` path; the package does not create that route.
 
 ### `chatgpt-oauth/react-native`
 

@@ -3,7 +3,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist/**", "coverage/**", ".lavish/**", "consensus.html"] },
+  { ignores: ["dist/**", "examples/**/dist/**", "coverage/**", ".lavish/**", "consensus.html"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -5,22 +5,48 @@
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
-  "files": ["dist", "README.md", "LICENSE"],
-  "engines": { "node": ">=20" },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./app-server": { "types": "./dist/app-server/index.d.ts", "import": "./dist/app-server/index.js" },
-    "./node": { "types": "./dist/node/index.d.ts", "import": "./dist/node/index.js" },
-    "./react": { "types": "./dist/react/index.d.ts", "import": "./dist/react/index.js" },
-    "./react-native": { "types": "./dist/react-native/index.d.ts", "import": "./dist/react-native/index.js" },
-    "./web": { "types": "./dist/web/index.d.ts", "import": "./dist/web/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./app-server": {
+      "types": "./dist/app-server/index.d.ts",
+      "import": "./dist/app-server/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    },
+    "./react-native": {
+      "types": "./dist/react-native/index.d.ts",
+      "import": "./dist/react-native/index.js"
+    },
+    "./web": {
+      "types": "./dist/web/index.d.ts",
+      "import": "./dist/web/index.js"
+    }
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "build": "tsup"
+    "build": "tsup",
+    "build:render-service": "tsup examples/render-service/src/index.ts --format esm --platform node --out-dir examples/render-service/dist --no-dts",
+    "render-service": "pnpm build && pnpm build:render-service && node examples/render-service/dist/index.js"
   },
   "peerDependencies": {
     "expo-secure-store": ">=12",
@@ -28,16 +54,24 @@
     "react-native": ">=0.72"
   },
   "peerDependenciesMeta": {
-    "expo-secure-store": { "optional": true },
-    "react": { "optional": true },
-    "react-native": { "optional": true }
+    "expo-secure-store": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
     "@types/node": "^24.1.0",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19.1.9",
     "eslint": "^9.32.0",
     "globals": "^16.3.0",
+    "pg": "^8.22.0",
     "react": "^19.1.1",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",

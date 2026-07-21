@@ -41,7 +41,17 @@ export function useChatGPTAuth({ endpoints }: { endpoints: AuthEndpoints }): Cha
       const response = await fetch(endpoints.session, { credentials: "same-origin", cache: "no-store" });
       if (response.status === 401 || response.status === 404) { setSession(null); return; }
       if (!response.ok) throw new Error(`Session request failed (${response.status}).`);
-      setSession(await response.json() as BrowserSession);
+      const payload: unknown = await response.json();
+      if (payload === null || typeof payload !== "object") throw new Error("Session route returned invalid metadata.");
+      const data = payload as Record<string, unknown>;
+      if (data.status !== "connected") throw new Error("Session route returned invalid metadata.");
+      const safe: BrowserSession = {
+        status: "connected",
+        ...(typeof data.accountId === "string" ? { accountId: data.accountId } : {}),
+        ...(typeof data.planType === "string" ? { planType: data.planType } : {}),
+        ...(typeof data.email === "string" ? { email: data.email } : {}),
+      };
+      setSession(safe);
     } catch (cause) {
       setError(cause instanceof Error ? cause : new Error("Session request failed."));
     } finally { setLoading(false); }

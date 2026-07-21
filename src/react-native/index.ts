@@ -13,6 +13,8 @@ export interface SecureStoreOptions {
   setOptions?: { keychainAccessible?: number };
 }
 
+const locksByStore = new WeakMap<SecureStoreLike, Map<string, Promise<void>>>();
+
 function keyFor(prefix: string, subject: string): string {
   return `${prefix}.${base64url(new TextEncoder().encode(subject))}`;
 }
@@ -22,7 +24,8 @@ export function createSecureStoreCredentialStore(
   options: SecureStoreOptions = {},
 ): CredentialStore {
   const prefix = options.prefix ?? "chatgpt-oauth";
-  const locks = new Map<string, Promise<void>>();
+  const locks = locksByStore.get(secureStore) ?? new Map<string, Promise<void>>();
+  locksByStore.set(secureStore, locks);
 
   async function serialized<T>(subject: string, operation: () => Promise<T>): Promise<T> {
     const previous = locks.get(subject) ?? Promise.resolve();
@@ -50,6 +53,8 @@ export function createSecureStoreCredentialStore(
         return { ok: true, current: stored };
       });
     },
-    async delete(subject) { await secureStore.deleteItemAsync(keyFor(prefix, subject)); },
+    async delete(subject) {
+      await serialized(subject, () => secureStore.deleteItemAsync(keyFor(prefix, subject)));
+    },
   };
 }

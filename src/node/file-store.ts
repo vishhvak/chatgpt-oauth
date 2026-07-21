@@ -2,6 +2,7 @@
 import { constants as fsConstants } from "node:fs";
 import {
   chmod,
+  link,
   mkdir,
   open,
   readFile,
@@ -21,6 +22,10 @@ export interface FileStoreOptions {
 
 type Records = Record<string, TokenSet>;
 
+function emptyRecords(): Records {
+  return Object.create(null) as Records;
+}
+
 function parseKey(value: string): Uint8Array {
   const bytes = /^[0-9a-f]{64}$/iu.test(value)
     ? Buffer.from(value, "hex")
@@ -33,7 +38,11 @@ async function syncDirectory(path: string): Promise<void> {
   try {
     const handle = await open(path, fsConstants.O_RDONLY);
     try { await handle.sync(); } finally { await handle.close(); }
-  } catch { /* Some filesystems do not permit directory fsync. */ }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (["EINVAL", "ENOTSUP", "EISDIR"].includes(code ?? "") || (process.platform === "win32" && code === "EPERM")) return;
+    throw error;
+  }
 }
 
 async function atomicWrite(path: string, value: Uint8Array | string): Promise<void> {
@@ -73,9 +82,13 @@ async function resolveKey(directory: string, keyFile: string, env: NodeJS.Proces
     return key;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    const winner = await readFile(keyFile);
-    if (winner.length !== 32) throw new StoreError("The credential key file is malformed.");
-    return winner;
+    const deadline = Date.now() + 1_000;
+    while (true) {
+      const winner = await readFile(keyFile);
+      if (winner.length === 32) return winner;
+      if (winner.length > 32 || Date.now() >= deadline) throw new StoreError("The credential key file is malformed.");
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
   }
 }
 
@@ -98,27 +111,75 @@ function decrypt(envelope: string, key: Uint8Array): Records {
     const plaintext = Buffer.concat([decipher.update(Buffer.from(ciphertextText, "base64")), decipher.final()]);
     const parsed: unknown = JSON.parse(plaintext.toString("utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
-    return parsed as Records;
+    const records = emptyRecords();
+    for (const [subject, token] of Object.entries(parsed)) records[subject] = token as TokenSet;
+    return records;
   } catch (cause) {
     throw new StoreError("Credential data failed authentication or is malformed.", { cause });
   }
 }
 
+async function staleLock(path: string): Promise<boolean> {
+  try {
+    const [pidText] = (await readFile(path, "utf8")).split(":");
+    const pid = Number(pidText);
+    if (!Number.isSafeInteger(pid) || pid <= 0) return Date.now() - (await stat(path)).mtimeMs > 1_000;
+    try { process.kill(pid, 0); return false; }
+    catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+}
+
+async function tryAcquireLock(path: string, owner: string): Promise<boolean> {
+  const claim = `${path}.claim.${process.pid}.${randomBytes(12).toString("hex")}`;
+  try {
+    const handle = await open(claim, "wx", 0o600);
+    try { await handle.writeFile(owner); await handle.sync(); } finally { await handle.close(); }
+    try { await link(claim, path); return true; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw error;
+    }
+  } finally {
+    await rm(claim, { force: true });
+  }
+}
+
+async function releaseLock(path: string, owner: string): Promise<void> {
+  const currentOwner = await readFile(path, "utf8").catch(() => "");
+  if (currentOwner === owner) await rm(path, { force: true });
+}
+
+async function reapStaleLock(path: string, owner: string): Promise<boolean> {
+  const reaper = `${path}.reaper`;
+  const reaperOwner = `${owner}:reaper`;
+  if (!await tryAcquireLock(reaper, reaperOwner)) {
+    // A crashed reaper must not make the credential store permanently unavailable.
+    if (await staleLock(reaper)) await rm(reaper, { force: true });
+    return false;
+  }
+  try {
+    if (await readFile(reaper, "utf8").catch(() => "") !== reaperOwner) return false;
+    if (!await staleLock(path)) return false;
+    if (await readFile(reaper, "utf8").catch(() => "") !== reaperOwner) return false;
+    await rm(path, { force: true });
+    return true;
+  } finally {
+    await releaseLock(reaper, reaperOwner);
+  }
+}
+
 async function withLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
   const deadline = Date.now() + 5_000;
-  let handle;
-  while (handle === undefined) {
-    try {
-      handle = await open(path, "wx", 0o600);
-      await handle.writeFile(String(process.pid));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (Date.now() >= deadline) throw new StoreError("Timed out waiting for the credential store lock.");
-      await new Promise<void>((resolve) => setTimeout(resolve, 10));
-    }
+  const owner = `${process.pid}:${randomBytes(12).toString("hex")}`;
+  while (!await tryAcquireLock(path, owner)) {
+    if (await reapStaleLock(path, owner)) continue;
+    if (Date.now() >= deadline) throw new StoreError("Timed out waiting for the credential store lock.");
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   try { return await operation(); }
-  finally { await handle.close(); await rm(path, { force: true }); }
+  finally { await releaseLock(path, owner); }
 }
 
 export async function createFileCredentialStore(options: FileStoreOptions): Promise<CredentialStore> {
@@ -132,7 +193,7 @@ export async function createFileCredentialStore(options: FileStoreOptions): Prom
   async function read(): Promise<Records> {
     try { return decrypt(await readFile(dataFile, "utf8"), key); }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyRecords();
       throw error;
     }
   }
@@ -142,7 +203,7 @@ export async function createFileCredentialStore(options: FileStoreOptions): Prom
     async compareAndSwap(subject, expectedVersion, next) {
       return withLock(lockFile, async () => {
         const records = await read();
-        const current = records[subject] ?? null;
+        const current = Object.hasOwn(records, subject) ? records[subject] ?? null : null;
         if ((current?.version ?? 0) !== expectedVersion) return { ok: false, current: structuredClone(current) };
         const stored = { ...next, version: expectedVersion + 1 };
         records[subject] = stored;
@@ -157,14 +218,5 @@ export async function createFileCredentialStore(options: FileStoreOptions): Prom
         await atomicWrite(dataFile, encrypt(records, key));
       });
     },
-  };
-}
-
-export async function fileModes(directory: string): Promise<{ directory: number; data: number; key: number }> {
-  const mask = 0o777;
-  return {
-    directory: (await stat(directory)).mode & mask,
-    data: (await stat(join(directory, "credentials.enc"))).mode & mask,
-    key: (await stat(join(directory, "credentials.key"))).mode & mask,
   };
 }

@@ -1,5 +1,5 @@
 /** Pins the twelve security and concurrency invariants required for the v1 contract. */
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -15,11 +15,12 @@ import {
   createPkce,
   parseSSE,
   pkceChallenge,
+  redact,
   type AuthSession,
   type CredentialStore,
   type TokenSet,
 } from "../src/index.js";
-import { createFileCredentialStore, fileModes } from "../src/node/index.js";
+import { createFileCredentialStore } from "../src/node/index.js";
 
 const subject = "app-user-42";
 
@@ -105,6 +106,27 @@ describe("v1 invariants", () => {
     const session = createAuthSession({ store, fetch: request as unknown as typeof fetch, now: () => 10_000 });
     await expect(session.getAccessToken(subject)).resolves.toBe("winner-access");
     expect(request).toHaveBeenCalledTimes(1);
+
+    let quarantined = token();
+    const quarantinedStore: CredentialStore = {
+      async load() { return structuredClone(quarantined); },
+      async compareAndSwap(_subject, expectedVersion, next) {
+        if (quarantined.version !== expectedVersion) return { ok: false, current: structuredClone(quarantined) };
+        quarantined = { ...next, version: expectedVersion + 1 };
+        return { ok: true, current: structuredClone(quarantined) };
+      },
+      async delete() {},
+    };
+    const quarantinedRequest = vi.fn(async () => {
+      quarantined = token({ version: 2, quarantinedAt: 9_000, quarantineReason: "invalid_grant" });
+      return tokenResponse();
+    });
+    const losingSession = createAuthSession({
+      store: quarantinedStore,
+      fetch: quarantinedRequest as unknown as typeof fetch,
+      now: () => 10_000,
+    });
+    await expect(losingSession.getAccessToken(subject)).rejects.toBeInstanceOf(ReauthRequiredError);
   });
 
   it("5. retains the old refresh token when rotation is omitted", async () => {
@@ -117,7 +139,7 @@ describe("v1 invariants", () => {
 
   it("6. quarantines invalid_grant permanently but never quarantines 429", async () => {
     const terminalStore = createMemoryStore({ [subject]: token() });
-    const terminalRequest = vi.fn(async () => Response.json({ error: "invalid_grant" }, { status: 400 }));
+    const terminalRequest = vi.fn(async () => Response.json({ padding: "x".repeat(1_100), error: "invalid_grant" }, { status: 400 }));
     const terminal = createAuthSession({ store: terminalStore, fetch: terminalRequest as unknown as typeof fetch, now: () => 10_000 });
     await expect(terminal.getAccessToken(subject)).rejects.toBeInstanceOf(ReauthRequiredError);
     expect((await terminalStore.load(subject))?.quarantineReason).toBe("invalid_grant");
@@ -126,9 +148,30 @@ describe("v1 invariants", () => {
 
     const limitedStore = createMemoryStore({ [subject]: token() });
     const limitedRequest = vi.fn(async () => new Response("limited", { status: 429, headers: { "retry-after": "3" } }));
-    const limited = createAuthSession({ store: limitedStore, fetch: limitedRequest as unknown as typeof fetch, now: () => 10_000 });
+    const limited = createAuthSession({
+      store: limitedStore,
+      fetch: limitedRequest as unknown as typeof fetch,
+      now: () => 10_000,
+      sleep: async () => undefined,
+    });
     await expect(limited.getAccessToken(subject)).rejects.toBeInstanceOf(RateLimitError);
     expect((await limitedStore.load(subject))?.quarantinedAt).toBeUndefined();
+    expect(limitedRequest).toHaveBeenCalledTimes(3);
+
+    const transientStore = createMemoryStore({ [subject]: token() });
+    const transientRequest = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockResolvedValueOnce(tokenResponse());
+    const transient = createAuthSession({
+      store: transientStore,
+      fetch: transientRequest as unknown as typeof fetch,
+      now: () => 10_000,
+      sleep: async () => undefined,
+    });
+    await expect(transient.getAccessToken(subject)).resolves.toBe("access-new");
+    expect(transientRequest).toHaveBeenCalledTimes(3);
+    expect((await transientStore.load(subject))?.quarantinedAt).toBeUndefined();
   });
 
   it("7. refreshes and retries inference once on 401, then surfaces a typed second 401", async () => {
@@ -145,6 +188,14 @@ describe("v1 invariants", () => {
     const rejected = createClient(fakeSession({ refreshAccessToken: refresh }), subject, { fetch: rejectedFetch as unknown as typeof fetch });
     await expect(rejected.respond({ model: "gpt-test", input: "hello" })).rejects.toBeInstanceOf(AuthError);
     expect(rejectedFetch).toHaveBeenCalledTimes(2);
+
+    const retryDate = new Date(Date.now() + 5_000).toUTCString();
+    const limited = createClient(fakeSession(), subject, {
+      fetch: vi.fn(async () => new Response("limited", { status: 429, headers: { "retry-after": retryDate } })) as unknown as typeof fetch,
+    });
+    const limitedError = await limited.respond({ model: "gpt-test", input: "hello" }).catch((caught: unknown) => caught);
+    expect(limitedError).toBeInstanceOf(RateLimitError);
+    expect((limitedError as RateLimitError).retryAfterMs).toBeGreaterThan(0);
   });
 
   it("8. parses chunk-split, multiline, done, and unknown SSE events", async () => {
@@ -153,7 +204,8 @@ describe("v1 invariants", () => {
       "text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\n",
       "event: future.event\ndata: first\ndata: second\n\n",
       "data: [DO",
-      "NE]\n\n",
+      "NE]\r",
+      "\n\r\n",
       "event: ignored\ndata: after\n\n",
     ]);
     const events = [];
@@ -162,28 +214,54 @@ describe("v1 invariants", () => {
     expect(events).toEqual([
       { type: "response.output_text.delta", data: { type: "response.output_text.delta", delta: "Hi" }, delta: "Hi" },
       { type: "future.event", data: "first\nsecond" },
-      { type: "done", data: null },
     ]);
   });
 
   it("9. redacts bearer credentials from transport error messages", async () => {
     const secret = "sk-secret-access-value";
-    const request = vi.fn(async () => new Response(`failure Authorization: Bearer ${secret}`, { status: 500 }));
+    const longSecret = "s".repeat(1_500);
+    const request = vi.fn(async () => new Response(
+      `failure Authorization: Bearer ${secret} {"access_token":"${longSecret}"}`,
+      { status: 500 },
+    ));
     const client = createClient(fakeSession(), subject, { fetch: request as unknown as typeof fetch });
     const error = await client.respond({ model: "gpt-test", input: "hello" }).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).not.toContain(secret);
+    expect((error as Error).message).not.toContain(longSecret.slice(0, 500));
     expect((error as Error).message).toContain("[REDACTED]");
+
+    const fetchSecret = "sk-fetch-secret";
+    const rejected = createClient(fakeSession(), subject, {
+      fetch: vi.fn(async () => { throw new Error(`network Bearer ${fetchSecret}`); }) as unknown as typeof fetch,
+    });
+    const rejectedError = await rejected.respond({ model: "gpt-test", input: "hello" }).catch((caught: unknown) => caught);
+    expect(rejectedError).toMatchObject({ code: "transport" });
+    expect((rejectedError as Error).message).not.toContain(fetchSecret);
+    const quoted = redact(JSON.stringify({ access_token: "abc'def", refresh_token: 'abc"def' }));
+    expect(quoted).not.toContain("abc'def");
+    expect(quoted).not.toContain('abc\\"def');
+    expect(redact(`{"access_token":"SECRET\\`)).not.toContain("SECRET");
   });
 
   it("10. enforces Node modes, encrypted roundtrip, and typed tamper failure", async () => {
     const directory = await mkdtemp(join(tmpdir(), "chatgpt-oauth-test-"));
     try {
       const store = await createFileCredentialStore({ directory, env: {} });
+      const staleLock = join(directory, "credentials.lock");
+      await writeFile(staleLock, "", { mode: 0o600 });
+      await utimes(staleLock, new Date(0), new Date(0));
+      await writeFile(`${staleLock}.reaper`, "999999:dead", { mode: 0o600 });
       const saved = await store.compareAndSwap(subject, 0, token({ version: 99 }));
       expect(saved.current?.version).toBe(1);
       expect(await store.load(subject)).toMatchObject({ accessToken: "access-old", version: 1 });
-      expect(await fileModes(directory)).toEqual({ directory: 0o700, data: 0o600, key: 0o600 });
+      await expect(store.compareAndSwap("__proto__", 0, token())).resolves.toMatchObject({ ok: true });
+      expect(await store.load("__proto__")).toMatchObject({ accessToken: "access-old", version: 1 });
+      expect({
+        directory: (await stat(directory)).mode & 0o777,
+        data: (await stat(join(directory, "credentials.enc"))).mode & 0o777,
+        key: (await stat(join(directory, "credentials.key"))).mode & 0o777,
+      }).toEqual({ directory: 0o700, data: 0o600, key: 0o600 });
       const dataFile = join(directory, "credentials.enc");
       const envelope = await readFile(dataFile, "utf8");
       expect(envelope).not.toContain("access-old");
@@ -218,7 +296,8 @@ describe("v1 invariants", () => {
       if (url.endsWith("/deviceauth/token")) {
         polls += 1;
         if (polls === 1) return Response.json({ error: "authorization_pending" }, { status: 403 });
-        if (polls === 2) return Response.json({ error: "slow_down" }, { status: 400 });
+        if (polls === 2) return new Response(null, { status: 403 });
+        if (polls === 3) return Response.json({ error: "slow_down" }, { status: 400 });
         return Response.json({ authorization_code: "code", code_verifier: "verifier" });
       }
       return tokenResponse();
@@ -232,7 +311,7 @@ describe("v1 invariants", () => {
     });
     const device = await session.startDeviceLogin(subject);
     await expect(device.wait()).resolves.toMatchObject({ accessToken: "access-new" });
-    expect(sleeps).toEqual([1_000, 6_000]);
-    expect(polls).toBe(3);
+    expect(sleeps).toEqual([1_000, 1_000, 1_000, 6_000]);
+    expect(polls).toBe(4);
   });
 });

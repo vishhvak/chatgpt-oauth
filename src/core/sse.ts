@@ -1,7 +1,7 @@
 /** Incrementally frames SSE across arbitrary chunks, including multiline data and unknown events. */
 import type { ResponseEvent } from "./types.js";
 
-function parseBlock(block: string): ResponseEvent | null {
+function parseBlock(block: string): ResponseEvent | "done" | null {
   let eventName = "message";
   const data: string[] = [];
   for (const line of block.split("\n")) {
@@ -14,7 +14,7 @@ function parseBlock(block: string): ResponseEvent | null {
   }
   if (data.length === 0) return null;
   const joined = data.join("\n");
-  if (joined === "[DONE]") return { type: "done", data: null };
+  if (joined === "[DONE]") return "done";
   let parsed: unknown = joined;
   try { parsed = JSON.parse(joined); } catch { /* Non-JSON SSE is valid and forwarded. */ }
   const record = parsed !== null && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
@@ -30,21 +30,22 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncIterable
   try {
     while (true) {
       const { done, value } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done }).replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+      buffer += decoder.decode(value, { stream: !done });
+      // Preserve a trailing CR until the next chunk so split CRLF is one newline, not two.
+      buffer = buffer.replaceAll("\r\n", "\n").replace(/\r(?!$)/gu, "\n");
+      if (done) buffer = buffer.replaceAll("\r", "\n");
       let boundary = buffer.indexOf("\n\n");
       while (boundary !== -1) {
         const event = parseBlock(buffer.slice(0, boundary));
         buffer = buffer.slice(boundary + 2);
-        if (event !== null) {
-          yield event;
-          if (event.type === "done") return;
-        }
+        if (event === "done") return;
+        if (event !== null) yield event;
         boundary = buffer.indexOf("\n\n");
       }
       if (done) break;
     }
     const final = parseBlock(buffer);
-    if (final !== null) yield final;
+    if (final !== null && final !== "done") yield final;
   } finally {
     reader.releaseLock();
   }

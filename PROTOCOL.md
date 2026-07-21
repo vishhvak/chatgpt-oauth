@@ -110,6 +110,8 @@ Bind only `127.0.0.1:1455`, never `0.0.0.0`, `::`, or a public interface. Accept
 - Android: use Custom Tabs. Store credentials in EncryptedSharedPreferences or an equivalently hardware-backed encrypted store.
 - Never use an embedded web view to capture passwords or session cookies.
 
+If a mobile app has multiple processes or JavaScript runtimes sharing one vault, implement CAS in the native storage layer. A JavaScript mutex is sufficient only for a single runtime.
+
 ## 5. Device flow
 
 POST JSON to the device user-code endpoint:
@@ -169,7 +171,7 @@ Quarantine only a token-endpoint response that is:
 
 CAS `quarantinedAt` and `quarantineReason` against the exact failed generation. If CAS conflicts with a healthy newer token, adopt the healthy winner and do not quarantine it. If the marker wins, every later access-token request throws `ReauthRequiredError(subject, reason)` without network access.
 
-Never quarantine HTTP 429, any 5xx response, timeout, DNS failure, or other network error. A 429 is `RateLimitError` and parses `Retry-After`; other transient refresh failures are `TokenRefreshError`.
+Never quarantine HTTP 429, any 5xx response, timeout, DNS failure, or other network error. Retry transient refresh failures at most three total attempts: honor `Retry-After` for 429 and otherwise use bounded exponential backoff. After the final attempt, a 429 is `RateLimitError`; other transient refresh failures are `TokenRefreshError`.
 
 Only successful fresh login or `logout` clears quarantine. Logout always deletes the subject record. There is no dependable public revoke endpoint for this OAuth client.
 

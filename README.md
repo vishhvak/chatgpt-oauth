@@ -118,6 +118,8 @@ await login.wait();
 
 React Native must provide standards-compliant `fetch`, `crypto.getRandomValues`, `crypto.subtle`, `atob`, and `btoa` (Expo runtime support or a platform polyfill). For an authorization-session flow, call `beginLogin(customRedirectUri)`, open the URL with `expo-web-browser`, then pass the returned callback to `completeLogin`.
 
+The injected SecureStore adapter serializes CAS and logout inside one JavaScript runtime. An app that runs multiple JS runtimes against the same native vault must supply a native `CredentialStore` whose CAS is atomic across those runtimes.
+
 ## Electron quickstart
 
 Run auth and the encrypted file store in the main process. Send only `pending.url`, status metadata, and generated model output over IPC. Never send refresh tokens to the renderer. The Node quickstart works unchanged in the main process; use `shell.openExternal(pending.url)` before awaiting the loopback callback.
@@ -169,7 +171,7 @@ Every request streams. `respond()` uses the same stream and collects output-text
 
 ## Lifecycle and operational posture
 
-Access tokens refresh inside a 120-second margin. In-process callers join one promise per `(store, subject)`; cross-process refreshers use compare-and-swap and adopt the winner. A token-endpoint `invalid_grant`, `invalid_token`, `invalid_request`, bare 401, or bare 403 quarantines only that subject. A 429, 5xx, or network error never destroys credentials. Only a fresh login or `logout()` clears quarantine.
+Access tokens refresh inside a 120-second margin. In-process callers join one promise per `(store, subject)`; stores with cross-process atomic CAS make refreshers adopt the winner. A token-endpoint `invalid_grant`, `invalid_token`, `invalid_request`, bare 401, or bare 403 quarantines only that subject. A 429, 5xx, or network error gets bounded backoff and never destroys credentials. Only a fresh login or `logout()` clears quarantine.
 
 Inference retries exactly once after a 401. `disabled()` is checked before network access so a remote flag can stop subscription traffic immediately.
 

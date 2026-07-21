@@ -2,7 +2,7 @@
 import { protocolWith, type ProtocolOverrides } from "./constants.js";
 import { extractUnverifiedClaims } from "./jwt.js";
 import { assertState, createPkce } from "./pkce.js";
-import { redact } from "./redact.js";
+import { readRedactedResponse, redact } from "./redact.js";
 import {
   AuthError,
   RateLimitError,
@@ -25,6 +25,10 @@ interface DeviceStartPayload {
   device_auth_id?: unknown;
   interval?: unknown;
   expires_in?: unknown;
+}
+
+function sanitizedCause(cause: unknown): Error {
+  return new Error(redact(cause instanceof Error ? cause.message : String(cause)));
 }
 
 export class TokenEndpointFailure extends Error {
@@ -54,7 +58,9 @@ function retryAfter(response: Response): number | undefined {
 }
 
 async function failure(response: Response, context: string): Promise<never> {
-  const body = redact((await response.text()).slice(0, 1_024));
+  // Redact before truncating; a cut closing quote must never defeat the JSON scrubber.
+  const body = await readRedactedResponse(response, 65_536);
+  const snippet = body.slice(0, 1_024);
   let errorCode: string | undefined;
   try {
     const parsed: unknown = JSON.parse(body);
@@ -71,9 +77,9 @@ async function failure(response: Response, context: string): Promise<never> {
     (response.status >= 400 && response.status < 500 &&
       ["invalid_grant", "invalid_token", "invalid_request"].includes(errorCode ?? ""));
   if (context === "refresh") {
-    throw new TokenEndpointFailure(response.status, errorCode, terminal, `${context} failed (${response.status}): ${body}`);
+    throw new TokenEndpointFailure(response.status, errorCode, terminal, `${context} failed (${response.status}): ${snippet}`);
   }
-  throw new AuthError(`${context} failed (${response.status}): ${body}`);
+  throw new AuthError(`${context} failed (${response.status}): ${snippet}`);
 }
 
 function normalizeToken(payload: TokenPayload, now: number, previous?: TokenSet): TokenSet {
@@ -124,17 +130,22 @@ export function createOAuth(runtime: OAuthRuntime = {}) {
   }
 
   async function exchange(code: string, verifier: string, redirectUri: string, previous?: TokenSet): Promise<TokenSet> {
-    const response = await request(protocol.TOKEN_URL, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: protocol.CLIENT_ID,
-        code,
-        code_verifier: verifier,
-        redirect_uri: redirectUri,
-      }),
-    });
+    let response: Response;
+    try {
+      response = await request(protocol.TOKEN_URL, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          client_id: protocol.CLIENT_ID,
+          code,
+          code_verifier: verifier,
+          redirect_uri: redirectUri,
+        }),
+      });
+    } catch (cause) {
+      throw new TransportError("Authorization code exchange failed due to a network error.", { cause: sanitizedCause(cause) });
+    }
     if (!response.ok) await failure(response, "code exchange");
     return normalizeToken(await json<TokenPayload>(response), now(), previous);
   }
@@ -151,31 +162,51 @@ export function createOAuth(runtime: OAuthRuntime = {}) {
   }
 
   async function refresh(previous: TokenSet): Promise<TokenSet> {
-    let response: Response;
-    try {
-      response = await request(protocol.TOKEN_URL, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          client_id: protocol.CLIENT_ID,
-          refresh_token: previous.refreshToken,
-          scope: protocol.SCOPES,
-        }),
-      });
-    } catch (cause) {
-      throw new TokenRefreshError("Token refresh failed due to a network error.", { cause });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let response: Response;
+      try {
+        response = await request(protocol.TOKEN_URL, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            client_id: protocol.CLIENT_ID,
+            refresh_token: previous.refreshToken,
+            scope: protocol.SCOPES,
+          }),
+        });
+      } catch (cause) {
+        if (attempt < 2) { await sleep(250 * 2 ** attempt); continue; }
+        throw new TokenRefreshError("Token refresh failed due to a network error.", { cause: sanitizedCause(cause) });
+      }
+      if (response.status >= 500 && attempt < 2) {
+        await sleep(250 * 2 ** attempt);
+        continue;
+      }
+      if (response.status === 429 && attempt < 2) {
+        await sleep(retryAfter(response) ?? 250 * 2 ** attempt);
+        continue;
+      }
+      if (!response.ok) await failure(response, "refresh");
+      try { return normalizeToken(await json<TokenPayload>(response), now(), previous); }
+      catch (cause) {
+        throw new TokenRefreshError("Token refresh returned an invalid response.", { cause });
+      }
     }
-    if (!response.ok) await failure(response, "refresh");
-    return normalizeToken(await json<TokenPayload>(response), now(), previous);
+    throw new TokenRefreshError();
   }
 
   async function startDeviceLogin(onComplete: (tokens: TokenSet) => Promise<TokenSet>) {
-    const response = await request(protocol.DEVICE_USERCODE_URL, {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ client_id: protocol.CLIENT_ID }),
-    });
+    let response: Response;
+    try {
+      response = await request(protocol.DEVICE_USERCODE_URL, {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ client_id: protocol.CLIENT_ID }),
+      });
+    } catch (cause) {
+      throw new TransportError("Device authorization failed due to a network error.", { cause: sanitizedCause(cause) });
+    }
     if (!response.ok) await failure(response, "device authorization");
     const payload = await json<DeviceStartPayload>(response);
     const userCode = typeof payload.user_code === "string" ? payload.user_code : payload.usercode;
@@ -190,20 +221,29 @@ export function createOAuth(runtime: OAuthRuntime = {}) {
       expiresAt,
       async wait(): Promise<TokenSet> {
         while (now() < expiresAt) {
-          const poll = await request(protocol.DEVICE_POLL_URL, {
-            method: "POST",
-            headers: { accept: "application/json", "content-type": "application/json" },
-            body: JSON.stringify({ device_auth_id: payload.device_auth_id, user_code: userCode }),
-          });
-          const pollBody = await json<Record<string, unknown>>(poll);
+          await sleep(interval);
+          if (now() >= expiresAt) break;
+          let poll: Response;
+          try {
+            poll = await request(protocol.DEVICE_POLL_URL, {
+              method: "POST",
+              headers: { accept: "application/json", "content-type": "application/json" },
+              body: JSON.stringify({ device_auth_id: payload.device_auth_id, user_code: userCode }),
+            });
+          } catch (cause) {
+            throw new TransportError("Device authorization poll failed due to a network error.", { cause: sanitizedCause(cause) });
+          }
+          let pollBody: Record<string, unknown> = {};
+          try { pollBody = await json<Record<string, unknown>>(poll); }
+          catch (error) {
+            if (poll.status !== 403 && poll.status !== 404) throw error;
+          }
           const pollError = typeof pollBody.error === "string" ? pollBody.error : undefined;
           if (pollError === "authorization_pending" || poll.status === 403 || poll.status === 404) {
-            await sleep(interval);
             continue;
           }
           if (pollError === "slow_down") {
             interval += 5_000;
-            await sleep(interval);
             continue;
           }
           if (!poll.ok) throw new AuthError(`Device authorization failed (${poll.status}).`);

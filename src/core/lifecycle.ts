@@ -6,6 +6,7 @@ import {
   AuthError,
   DisabledError,
   ReauthRequiredError,
+  TokenRefreshError,
   type AuthSession,
   type CredentialStore,
   type Session,
@@ -86,11 +87,17 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
       const next = await oauth.refresh(current);
       const swapped = await options.store.compareAndSwap(subject, current.version, next);
       if (swapped.ok) return next;
+      if (swapped.current?.quarantinedAt !== undefined) {
+        throw new ReauthRequiredError(subject, swapped.current.quarantineReason ?? "quarantined");
+      }
       if (swapped.current !== null) return swapped.current;
       throw new ReauthRequiredError(subject, "credentials_deleted_during_refresh");
     } catch (error) {
       if (error instanceof TokenEndpointFailure && error.terminal) {
         return quarantine(subject, current, error.errorCode ?? `http_${error.status}`);
+      }
+      if (error instanceof TokenEndpointFailure) {
+        throw new TokenRefreshError(`Token refresh failed (${error.status}).`, { cause: error });
       }
       throw error;
     }

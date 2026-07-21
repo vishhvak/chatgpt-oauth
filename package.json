@@ -1,0 +1,45 @@
+{
+  "name": "chatgpt-oauth",
+  "version": "0.1.0",
+  "description": "Experimental, cross-platform OAuth and subscription client for ChatGPT accounts",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "files": ["dist", "README.md", "PROTOCOL.md", "LICENSE"],
+  "engines": { "node": ">=20" },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./node": { "types": "./dist/node/index.d.ts", "import": "./dist/node/index.js" },
+    "./react": { "types": "./dist/react/index.d.ts", "import": "./dist/react/index.js" },
+    "./react-native": { "types": "./dist/react-native/index.d.ts", "import": "./dist/react-native/index.js" },
+    "./web": { "types": "./dist/web/index.d.ts", "import": "./dist/web/index.js" }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "build": "tsup"
+  },
+  "peerDependencies": {
+    "expo-secure-store": ">=12",
+    "react": ">=18",
+    "react-native": ">=0.72"
+  },
+  "peerDependenciesMeta": {
+    "expo-secure-store": { "optional": true },
+    "react": { "optional": true },
+    "react-native": { "optional": true }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.32.0",
+    "@types/node": "^24.1.0",
+    "@types/react": "^19.1.9",
+    "eslint": "^9.32.0",
+    "globals": "^16.3.0",
+    "react": "^19.1.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.38.0",
+    "vitest": "^3.2.4"
+  }
+}

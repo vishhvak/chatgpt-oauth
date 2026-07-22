@@ -1,9 +1,12 @@
+import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
+import com.vanniktech.maven.publish.SonatypeHost
+
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlin.compose)
-    `maven-publish`
+    alias(libs.plugins.maven.publish)
 }
 
 android {
@@ -16,7 +19,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
-    publishing { singleVariant("release") { withSourcesJar() } }
 }
 
 kotlin { jvmToolchain(17) }
@@ -32,13 +34,35 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
 }
 
-afterEvaluate {
-    publishing {
-        publications {
-            create<MavenPublication>("release") {
-                from(components["release"])
-                artifactId = "chatgpt-oauth-android"
+mavenPublishing {
+    configure(AndroidSingleVariantLibrary("release", sourcesJar = true, publishJavadocJar = true))
+    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
+    signAllPublications()
+
+    // group + version come from the root build's allprojects block.
+    coordinates(artifactId = "chatgpt-oauth-android")
+
+    pom {
+        name.set("chatgpt-oauth-android")
+        description.set("Sign in with ChatGPT (OAuth) for Android.")
+        url.set("https://github.com/vishhvak/chatgpt-oauth")
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://github.com/vishhvak/chatgpt-oauth/blob/main/LICENSE")
             }
+        }
+        developers {
+            developer {
+                id.set("vishhvak")
+                name.set("Vishhvak Srinivasan")
+                email.set("vishhvak@outlook.com")
+            }
+        }
+        scm {
+            url.set("https://github.com/vishhvak/chatgpt-oauth")
+            connection.set("scm:git:git://github.com/vishhvak/chatgpt-oauth.git")
+            developerConnection.set("scm:git:ssh://git@github.com/vishhvak/chatgpt-oauth.git")
         }
     }
 }

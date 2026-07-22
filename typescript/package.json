@@ -1,0 +1,123 @@
+{
+  "name": "chatgpt-oauth",
+  "version": "0.1.0",
+  "description": "Experimental, cross-platform OAuth and subscription client for ChatGPT accounts",
+  "type": "module",
+  "license": "MIT",
+  "author": "Vishhvak Srinivasan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vishhvak/chatgpt-oauth.git",
+    "directory": "typescript"
+  },
+  "homepage": "https://github.com/vishhvak/chatgpt-oauth#readme",
+  "bugs": "https://github.com/vishhvak/chatgpt-oauth/issues",
+  "keywords": [
+    "chatgpt",
+    "openai",
+    "codex",
+    "oauth",
+    "pkce",
+    "subscription",
+    "app-server",
+    "react",
+    "react-native"
+  ],
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./ai-sdk": {
+      "types": "./dist/ai-sdk/index.d.ts",
+      "import": "./dist/ai-sdk/index.js"
+    },
+    "./app-server": {
+      "types": "./dist/app-server/index.d.ts",
+      "import": "./dist/app-server/index.js"
+    },
+    "./http": {
+      "types": "./dist/http/index.d.ts",
+      "import": "./dist/http/index.js"
+    },
+    "./next": {
+      "types": "./dist/next/index.d.ts",
+      "import": "./dist/next/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    },
+    "./react-native": {
+      "types": "./dist/react-native/index.d.ts",
+      "import": "./dist/react-native/index.js"
+    },
+    "./web": {
+      "types": "./dist/web/index.d.ts",
+      "import": "./dist/web/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "build": "tsup",
+    "prepublishOnly": "pnpm build",
+    "build:render-service": "tsup --config examples/render-service/tsup.config.ts",
+    "render-service": "pnpm build && pnpm build:render-service && node examples/render-service/dist/server/index.js"
+  },
+  "peerDependencies": {
+    "@ai-sdk/openai": ">=4",
+    "expo-secure-store": ">=12",
+    "react": ">=18",
+    "react-native": ">=0.72"
+  },
+  "peerDependenciesMeta": {
+    "@ai-sdk/openai": {
+      "optional": true
+    },
+    "expo-secure-store": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@ai-sdk/openai": "^4.0.17",
+    "@eslint/js": "^9.32.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^24.1.0",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.2.3",
+    "ai": "^7.0.34",
+    "eslint": "^9.32.0",
+    "globals": "^16.3.0",
+    "jsdom": "^29.1.1",
+    "pg": "^8.22.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.2.7",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.38.0",
+    "vitest": "^3.2.4"
+  }
+}

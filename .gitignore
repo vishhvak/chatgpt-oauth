@@ -10,5 +10,15 @@ coverage/
 SPEC.md
 REFERENCES.md
 HANDOFF.md
-PROTOCOL.md
 consensus.html
+.venv/
+.build/
+.gradle/
+build/
+local.properties
+.idea/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+videos/

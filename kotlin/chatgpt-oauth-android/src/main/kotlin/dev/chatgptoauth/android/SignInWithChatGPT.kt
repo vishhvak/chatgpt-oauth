@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import dev.chatgptoauth.AuthSession
 import dev.chatgptoauth.PendingLogin
 import dev.chatgptoauth.Session
+import dev.chatgptoauth.requireSubject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -62,7 +63,7 @@ public fun SignInWithChatGPT(
     mode: SignInMode = SignInMode.Device,
     showDisclaimer: Boolean = true,
 ) {
-    require(subject.isNotBlank()) { "subject must be a nonempty server-derived identifier." }
+    requireSubject(subject)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var view: AuthView by remember(auth, subject) { mutableStateOf(AuthView.Loading) }

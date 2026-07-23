@@ -58,6 +58,29 @@ final class SSETests: XCTestCase {
         XCTAssertEqual(events, [ResponseEvent(type: "message", data: .string("café"))])
     }
 
+    func testLargeEventDeliveredAcrossManySmallChunksParsesCorrectly() throws {
+        // Regression coverage for O(n²) framing: one large event delivered as thousands of tiny
+        // chunks previously re-normalized and re-scanned the whole accumulated buffer on every
+        // chunk. This drives that exact shape through the incremental parser.
+        let payload = String(repeating: "abcdefghij", count: 5_000) // 50,000 bytes
+        let json = #"{"type":"custom","delta":""# + payload + #""}"#
+        let full = Data(("data: " + json + "\n\n").utf8)
+
+        var parser = SSEParser()
+        var events: [ResponseEvent] = []
+        var index = full.startIndex
+        while index < full.endIndex {
+            let end = full.index(index, offsetBy: 3, limitedBy: full.endIndex) ?? full.endIndex
+            events.append(contentsOf: try parser.consume(full[index..<end]))
+            index = end
+        }
+        events.append(contentsOf: try parser.finish())
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.type, "custom")
+        XCTAssertEqual(events.first?.delta, payload)
+    }
+
     func testJSONTypeOverridesSSENameAndDeltaIsExposed() throws {
         let payload = Data("event: fallback\ndata: {\"type\":\"custom\",\"delta\":\"x\"}\n\n".utf8)
         XCTAssertEqual(

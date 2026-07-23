@@ -77,7 +77,7 @@ class OAuthEdgeCaseTest {
         )
         val protocol = testProtocol().copy(responsesUrl = server.url("/responses").toString())
         val auth = AuthSession(store, OkHttpClient(), now = { 1_000L }, sleep = {}, protocol = protocol)
-        val client = SubscriptionAIClient(auth, "subject", OkHttpClient(), protocol, sessionId = "session-test")
+        val client = SubscriptionAI(auth, "subject", OkHttpClient(), protocol, sessionId = "session-test")
         assertEquals("Hi", client.respond(ResponseRequest("gpt-test", "hello")).outputText)
 
         val first = server.takeRequest(1, TimeUnit.SECONDS)!!

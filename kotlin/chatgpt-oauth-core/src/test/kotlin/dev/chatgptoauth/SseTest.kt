@@ -32,4 +32,15 @@ class SseTest {
             parseSse(flowOf("event: custom\ndata: opaque".toByteArray())).toList(),
         )
     }
+
+    @Test
+    fun `normalizes and parses one large event split across many small chunks`() = runTest {
+        val payload = "x".repeat(50_000)
+        val full = "data: {\"type\":\"custom.large\",\"delta\":\"$payload\"}\r\n\r\n"
+        val chunks = full.chunked(3).map { it.toByteArray() }
+        val events = parseSse(flowOf(*chunks.toTypedArray())).toList()
+        assertEquals(1, events.size)
+        assertEquals("custom.large", events[0].type)
+        assertEquals(payload, events[0].delta)
+    }
 }

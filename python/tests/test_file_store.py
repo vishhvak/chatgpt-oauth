@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from chatgpt_oauth import StoreError, TokenSet, create_file_credential_store
+from chatgpt_oauth import StoreError, TokenSet, create_file_store
 from chatgpt_oauth.stores.file import _decrypt
 
 
 @pytest.mark.asyncio
 async def test_encrypted_roundtrip_modes_cas_and_tamper(tmp_path: Path) -> None:
     directory = tmp_path / "credentials"
-    store = await create_file_credential_store(directory, env={})
+    store = await create_file_store(directory, env={})
     token = TokenSet("access-secret", "refresh-secret", 1000, 99)
     saved = await store.compare_and_swap("subject", 0, token)
     assert saved.ok and saved.current is not None and saved.current.version == 1
@@ -41,7 +41,7 @@ async def test_environment_key_encodings_and_no_key_file(tmp_path: Path) -> None
         ("base64url", base64.urlsafe_b64encode(key).rstrip(b"=").decode()),
     ):
         directory = tmp_path / name
-        await create_file_credential_store(directory, env={"CHATGPT_OAUTH_KEY": encoded})
+        await create_file_store(directory, env={"CHATGPT_OAUTH_KEY": encoded})
         assert not (directory / "credentials.key").exists()
 
 

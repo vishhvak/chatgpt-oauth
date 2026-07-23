@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
 
-from ..types import CompareAndSwapResult, TokenSet
+from ..types import CompareAndSwapResult, TokenSet, validate_subject
 
 
 class MemoryCredentialStore:
@@ -16,8 +16,7 @@ class MemoryCredentialStore:
 
     async def load(self, subject: str) -> TokenSet | None:
         """Loads credentials for one explicit subject."""
-        if not subject:
-            raise ValueError("subject must be nonempty")
+        validate_subject(subject)
         token = self._records.get(subject)
         return replace(token) if token is not None else None
 
@@ -25,8 +24,7 @@ class MemoryCredentialStore:
         self, subject: str, expected_version: int, next_token: TokenSet
     ) -> CompareAndSwapResult:
         """Stores expected-version-plus-one or returns the current winner."""
-        if not subject:
-            raise ValueError("subject must be nonempty")
+        validate_subject(subject)
         async with self._lock:
             current = self._records.get(subject)
             if (current.version if current else 0) != expected_version:
@@ -37,8 +35,7 @@ class MemoryCredentialStore:
 
     async def delete(self, subject: str) -> None:
         """Deletes credentials for one explicit subject."""
-        if not subject:
-            raise ValueError("subject must be nonempty")
+        validate_subject(subject)
         async with self._lock:
             self._records.pop(subject, None)
 

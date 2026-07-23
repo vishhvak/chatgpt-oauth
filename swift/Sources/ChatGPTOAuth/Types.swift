@@ -121,6 +121,18 @@ public protocol CredentialStore: Sendable {
     func delete(subject: String) async throws
 }
 
+/// Rejects an empty credential subject with the shared, redacted store failure.
+///
+/// Shared by every `CredentialStore` implementation and `AuthSession` so a single guard governs
+/// the empty-subject precondition. `AuthSession` previously threw `.authentication` for this case;
+/// unified here on `.store` to match the two store implementations, since an empty subject is a
+/// storage-key precondition rather than a rejected authentication attempt.
+func requireSubject(_ subject: String) throws {
+    guard !subject.isEmpty else {
+        throw ChatGPTOAuthError.store(message: "Credential subject must not be empty.")
+    }
+}
+
 /// Retains the browser authorization request state until callback completion.
 public struct PendingLogin: Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
     /// The URL to open in the system authentication session.
@@ -353,6 +365,33 @@ public enum ChatGPTOAuthErrorCode: String, Sendable, Equatable {
     case disabled
     /// Credential storage failed.
     case store
+}
+
+/// The RFC-1123 formatter for the HTTP-date form of Retry-After. Building a `DateFormatter` is
+/// expensive, so it is hoisted to a single file-scope instance shared by every parse.
+private let retryAfterHTTPDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss z"
+    return formatter
+}()
+
+/// Parses an RFC-7231 Retry-After header (delay-seconds or an HTTP-date) into milliseconds from now.
+///
+/// Shared by the Responses client's 429 handling and the OAuth token endpoint's retry/backoff path.
+func retryAfterMilliseconds(_ response: HTTPURLResponse) -> Int64? {
+    guard let raw = response.value(forHTTPHeaderField: "retry-after")?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !raw.isEmpty else { return nil }
+    if let seconds = Double(raw), seconds.isFinite {
+        let milliseconds = max(0, seconds * 1_000)
+        guard milliseconds < Double(Int64.max) else { return Int64.max }
+        return Int64(milliseconds)
+    }
+    guard let date = retryAfterHTTPDateFormatter.date(from: raw) else { return nil }
+    let milliseconds = max(0, date.timeIntervalSinceNow * 1_000)
+    guard milliseconds < Double(Int64.max) else { return Int64.max }
+    return Int64(milliseconds)
 }
 
 /// Defines typed, redacted failures without carrying access or refresh tokens.

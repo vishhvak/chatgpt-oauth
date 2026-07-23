@@ -27,21 +27,13 @@ React, React Native, and `expo-secure-store` are optional peers. Core and Node i
 
 ```ts
 import { createAuthSession, createClient } from "chatgpt-oauth";
-import { createFileCredentialStore, waitForLoopbackCallback } from "chatgpt-oauth/node";
+import { createFileStore, loginWithLoopback } from "chatgpt-oauth/node";
 
-const store = await createFileCredentialStore({
-  directory: `${process.env.HOME}/.my-app/chatgpt`,
-});
-const auth = createAuthSession({
-  store,
-  disabled: () => process.env.CHATGPT_SUBSCRIPTIONS_DISABLED === "1",
-});
+const store = await createFileStore({ directory: `${process.env.HOME}/.my-app/chatgpt` });
+const auth = createAuthSession({ store, disabled: () => process.env.CHATGPT_SUBSCRIPTIONS_DISABLED === "1" });
 const subject = "default"; // explicit single-user identity; never ambient
 
-const pending = await auth.beginLogin();
-console.log(`Open ${pending.url}`);
-const callback = await waitForLoopbackCallback(pending);
-await auth.completeLogin(subject, callback, pending);
+await loginWithLoopback(auth, subject);
 
 const ai = createClient(auth, subject);
 const result = await ai.respond({ model: "gpt-5.4-mini", input: "Explain CAS in one sentence." });
@@ -91,7 +83,7 @@ export const { GET, POST } = toNextJsHandler(auth, {
 
 The `state`/`verifier` pair defaults to an encrypted, `httpOnly`, 10-minute cookie whose ciphertext binds the subject, so a cookie captured from one signed-in user cannot complete a login for another. Pass a `pending` store instead to keep it in your database. Non-Next hosts import the same handler as a plain `(Request) => Response` from `chatgpt-oauth/http`.
 
-The primitives stay available when you need a route shape of your own — `createAuthorizationRedirect` and `completeAuthorizationRedirect` from `chatgpt-oauth/web`, plus `auth.status(subject)` and `auth.logout(subject)`.
+The primitives stay available when you need a route shape of your own — `auth.beginLogin(redirectUri)` and `completeAuthorizationRedirect` from `chatgpt-oauth/web`, plus `auth.status(subject)` and `auth.logout(subject)`.
 
 ```tsx
 import { SignInWithChatGPT } from "chatgpt-oauth/react";
@@ -158,10 +150,10 @@ Device flow avoids custom-scheme redirect custody. Inject Expo SecureStore so th
 ```ts
 import * as SecureStore from "expo-secure-store";
 import { createAuthSession } from "chatgpt-oauth";
-import { createSecureStoreCredentialStore } from "chatgpt-oauth/react-native";
+import { createSecureStore } from "chatgpt-oauth/react-native";
 
 const subject = authenticatedProfile.id; // app-owned identity
-const auth = createAuthSession({ store: createSecureStoreCredentialStore(SecureStore) });
+const auth = createAuthSession({ store: createSecureStore(SecureStore) });
 const login = await auth.startDeviceLogin(subject);
 openBrowser(login.verificationUrl);
 showCode(login.userCode);
@@ -178,12 +170,9 @@ Run auth in the main process and send only safe status/output over IPC:
 
 ```ts
 import { shell } from "electron";
+import { loginWithLoopback } from "chatgpt-oauth/node";
 
-const pending = await auth.beginLogin();
-const callbackPromise = waitForLoopbackCallback(pending);
-await shell.openExternal(pending.url);
-const callback = await callbackPromise;
-await auth.completeLogin(mainProcessSession.userId, callback, pending);
+await loginWithLoopback(auth, mainProcessSession.userId, { open: shell.openExternal });
 ```
 
 Never send access or refresh tokens to the renderer.
@@ -249,7 +238,8 @@ Every request streams. `respond()` uses the same stream and collects output-text
 
 ### `chatgpt-oauth`
 
-- `createAuthSession({ store, disabled?, fetch?, crypto?, now?, sleep?, protocol? })` returns `beginLogin`, `completeLogin`, `startDeviceLogin`, `getAccessToken`, `refreshAccessToken`, `status`, and `logout`.
+- `createAuthSession({ store, disabled?, fetch?, crypto?, now?, sleep?, protocol? })` returns `beginLogin`, `completeLogin`, `startDeviceLogin`, `getAccessToken`, `refreshAccessToken`, `getTokenSet`, `status`, and `logout`.
+- `getTokenSet(subject, forceRefresh?)` returns the full `TokenSet` (bearer plus `accountId`) in one store read; `getAccessToken`/`refreshAccessToken` are implemented on top of it.
 - `createClient(auth, subject, { onRateLimits?, ...options })` returns `respond()`, `stream()`, and the latest response-header snapshot as `lastRateLimits`. It has no standalone usage read.
 - `CredentialStore` requires `load(subject)`, `compareAndSwap(subject, expectedVersion, next)`, and `delete(subject)`.
 - `createMemoryStore()` is for tests and development only.
@@ -270,8 +260,9 @@ Every request streams. `respond()` uses the same stream and collects output-text
 
 ### `chatgpt-oauth/node`
 
-- `createFileCredentialStore({ directory, keyFile?, env? })`
+- `createFileStore({ directory, keyFile?, env? })`
 - `waitForLoopbackCallback(pending, { port?, timeoutMs? })`
+- `loginWithLoopback(auth, subject, { open?, port?, timeoutMs? })` composes `beginLogin` → `open` → `waitForLoopbackCallback` → `completeLogin`. `open` defaults to logging `Open ${url}`.
 
 ### `chatgpt-oauth/app-server` (experimental)
 
@@ -280,7 +271,6 @@ Every request streams. `respond()` uses the same stream and collects output-text
 
 ### `chatgpt-oauth/web`
 
-- `createAuthorizationRedirect(auth, redirectUri)`
 - `parseAuthorizationCallback(callback, expectedState)`
 - `completeAuthorizationRedirect(auth, subject, callback, pending)`
 
@@ -292,7 +282,7 @@ Every request streams. `respond()` uses the same stream and collects output-text
 
 ### `chatgpt-oauth/react-native`
 
-- `createSecureStoreCredentialStore(injectedSecureStore, options?)`
+- `createSecureStore(injectedSecureStore, options?)`
 
 ## Lifecycle and operational posture
 

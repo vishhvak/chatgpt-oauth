@@ -92,6 +92,8 @@ describe("http handler", () => {
   });
 
   it("requires either a secret or a pending store", () => {
-    expect(() => createChatGPTHandler(authFor(), { subject: () => "alice" })).toThrow(TypeError);
+    // The type requires one of the two; this simulates a plain-JS caller that bypasses it.
+    const options = { subject: () => "alice" } as unknown as Parameters<typeof createChatGPTHandler>[1];
+    expect(() => createChatGPTHandler(authFor(), options)).toThrow(TypeError);
   });
 });

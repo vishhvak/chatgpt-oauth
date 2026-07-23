@@ -50,22 +50,22 @@ public class AuthSession(
         return oauth.startDeviceLogin { token -> persistFresh(subject, token) }
     }
 
-    /** Returns a valid access token for the explicit subject, refreshing near expiry. */
-    public suspend fun getAccessToken(subject: String): String {
+    /** Returns the current token set for the explicit subject in one store read, refreshing near expiry or when forced. */
+    public suspend fun getTokenSet(subject: String, forceRefresh: Boolean = false): TokenSet {
         requireSubject(subject)
         if (disabled()) throw DisabledError()
+        if (forceRefresh) return inFlight(subject, true).token
         val token = store.load(subject) ?: throw ReauthRequiredError(subject, "missing_credentials")
         if (token.quarantinedAt != null) throw ReauthRequiredError(subject, token.quarantineReason ?: "quarantined")
-        if (token.expiresAt - now() >= protocol.refreshMarginMs) return token.accessToken
-        return inFlight(subject, false).token.accessToken
+        if (token.expiresAt - now() >= protocol.refreshMarginMs) return token
+        return inFlight(subject, false).token
     }
 
+    /** Returns a valid access token for the explicit subject, refreshing near expiry. */
+    public suspend fun getAccessToken(subject: String): String = getTokenSet(subject).accessToken
+
     /** Forces a network refresh for the explicit subject without accepting a skipped non-forced flight. */
-    public suspend fun refreshAccessToken(subject: String): String {
-        requireSubject(subject)
-        if (disabled()) throw DisabledError()
-        return inFlight(subject, true).token.accessToken
-    }
+    public suspend fun refreshAccessToken(subject: String): String = getTokenSet(subject, forceRefresh = true).accessToken
 
     /** Returns safe connection metadata for the explicit subject without exposing tokens. */
     public suspend fun status(subject: String): Session? {
@@ -175,10 +175,6 @@ public class AuthSession(
                 if (registry.flights[subject]?.deferred === flight.deferred) registry.flights.remove(subject)
             }
         }
-    }
-
-    private fun requireSubject(subject: String) {
-        require(subject.isNotBlank()) { "subject must be a nonempty server-derived identifier." }
     }
 
     private companion object {

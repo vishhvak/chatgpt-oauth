@@ -1,8 +1,6 @@
 package dev.chatgptoauth
 
 import java.io.IOException
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
@@ -23,7 +21,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import okio.Buffer
 
 private val oauthJson = Json { ignoreUnknownKeys = true }
 private val jsonMediaType = "application/json".toMediaType()
@@ -50,27 +47,7 @@ internal suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutin
 
 private fun sanitizedCause(cause: Throwable): Throwable = IOException(redact(cause.message ?: cause::class.simpleName.orEmpty()))
 
-private fun retryAfter(response: Response, now: Long): Long? {
-    val value = response.header("retry-after") ?: return null
-    value.toDoubleOrNull()?.takeIf(Double::isFinite)?.let { return maxOf(0L, (it * 1_000).toLong()) }
-    val instant = runCatching { ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant() }.getOrNull()
-    return instant?.toEpochMilli()?.minus(now)?.coerceAtLeast(0L)
-}
-
-private fun Response.readRedacted(readLimit: Long = 65_536L): String = use { response ->
-    val source = response.body?.source() ?: return@use ""
-    val bytes = runCatching {
-        val sink = Buffer()
-        while (sink.size < readLimit) {
-            val read = source.read(sink, minOf(8_192L, readLimit - sink.size))
-            if (read == -1L) break
-        }
-        sink.readByteArray()
-    }.getOrElse { error ->
-        return@use redact(" [response read failed: ${error.message.orEmpty()}]")
-    }
-    redact(bytes.toString(Charsets.UTF_8))
-}
+private fun retryAfter(response: Response, now: Long): Long? = parseRetryAfterMs(response.header("retry-after"), now)
 
 private fun Response.readBody(): String = use { response -> response.body?.string().orEmpty() }
 
@@ -85,14 +62,14 @@ private fun parseObject(body: String, message: String): JsonObject = try {
  *
  * @property protocol Endpoint and timing configuration, normally the production defaults.
  */
-public class OAuth(
+internal class OAuth(
     private val client: OkHttpClient = OkHttpClient(),
-    public val protocol: ProtocolConfig = ProtocolConfig(),
+    val protocol: ProtocolConfig = ProtocolConfig(),
     private val now: () -> Long = System::currentTimeMillis,
     private val sleep: suspend (Long) -> Unit = { delay(it) },
 ) {
     /** Creates a protected PKCE login and its browser authorization URL. */
-    public suspend fun beginLogin(redirectUri: String = protocol.loopbackRedirect): PendingLogin {
+    suspend fun beginLogin(redirectUri: String = protocol.loopbackRedirect): PendingLogin {
         val generated = createPkce()
         val url = protocol.authorizeUrl.toHttpUrl().newBuilder().apply {
             addQueryParameter("response_type", "code")
@@ -108,7 +85,7 @@ public class OAuth(
     }
 
     /** Validates callback state before exchanging its authorization code. */
-    public suspend fun completeLogin(callbackUrl: String, pending: PendingLogin): TokenSet {
+    suspend fun completeLogin(callbackUrl: String, pending: PendingLogin): TokenSet {
         val callback = runCatching { callbackUrl.toHttpUrl() }
             .getOrElse { throw AuthError("Authorization callback URL was invalid.") }
         assertState(pending.state, callback.queryParameter("state"))
@@ -137,7 +114,7 @@ public class OAuth(
     }
 
     /** Refreshes one credential generation with bounded transient retries. */
-    public suspend fun refresh(previous: TokenSet): TokenSet {
+    suspend fun refresh(previous: TokenSet): TokenSet {
         repeat(3) { attempt ->
             val request = Request.Builder().url(protocol.tokenUrl).post(
                 FormBody.Builder()
@@ -209,7 +186,7 @@ public class OAuth(
                     ).build()
                 val poll = execute(pollRequest, "Device authorization poll")
                 val status = poll.code
-                val rawBody = poll.readRedacted()
+                val rawBody = poll.readRedactedSnippet(readLimit = 65_536L)
                 val pollBody = runCatching { oauthJson.parseToJsonElement(rawBody).jsonObject }.getOrElse {
                     if (status == 403 || status == 404) JsonObject(emptyMap())
                     else throw TransportError("OAuth endpoint returned invalid JSON.", sanitizedCause(it))
@@ -242,7 +219,7 @@ public class OAuth(
     private fun failure(response: Response, context: String): Nothing {
         val status = response.code
         val retryAfterMs = retryAfter(response, now())
-        val body = response.readRedacted()
+        val body = response.readRedactedSnippet(readLimit = 65_536L)
         val snippet = body.take(1_024)
         val parsed = runCatching { oauthJson.parseToJsonElement(body).jsonObject }.getOrNull()
         val error = parsed?.get("error")

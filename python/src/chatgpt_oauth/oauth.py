@@ -27,6 +27,7 @@ from .types import (
     TokenRefreshError,
     TokenSet,
     TransportError,
+    validate_subject,
 )
 
 Clock = Callable[[], int]
@@ -47,12 +48,8 @@ async def _default_sleep(milliseconds: int) -> None:
     await asyncio.sleep(milliseconds / 1000)
 
 
-def _validate_subject(subject: str) -> None:
-    if not subject:
-        raise ValueError("subject must be nonempty")
-
-
-def _retry_after(response: httpx.Response, now_ms: int) -> int | None:
+def parse_retry_after(response: httpx.Response, now_ms: int) -> int | None:
+    """Parses an RFC 7231 Retry-After header as delta-seconds or an HTTP-date."""
     value = response.headers.get("retry-after")
     if value is None:
         return None
@@ -96,7 +93,7 @@ def _failure(response: httpx.Response, context: str, now_ms: int) -> None:
     except json.JSONDecodeError:
         pass
     if response.status_code == 429:
-        raise RateLimitError(_retry_after(response, now_ms))
+        raise RateLimitError(parse_retry_after(response, now_ms))
     terminal = response.status_code in (401, 403) or (
         400 <= response.status_code < 500
         and error_code in ("invalid_grant", "invalid_token", "invalid_request")
@@ -168,7 +165,7 @@ class OAuth:
 
     async def begin_login(self, subject: str, redirect_uri: str | None = None) -> PendingLogin:
         """Creates protected PKCE state for one explicit subject without persisting it."""
-        _validate_subject(subject)
+        validate_subject(subject)
         verifier, challenge, state = create_pkce()
         redirect = redirect_uri or self.protocol.loopback_redirect
         params = {
@@ -220,7 +217,7 @@ class OAuth:
         self, subject: str, callback_url: str, pending: PendingLogin
     ) -> TokenSet:
         """Validates state first and exchanges one subject's callback code."""
-        _validate_subject(subject)
+        validate_subject(subject)
         query = parse_qs(urlparse(callback_url).query, keep_blank_values=True)
         state_values = query.get("state")
         actual_state = state_values[0] if state_values else None
@@ -257,7 +254,7 @@ class OAuth:
                 await self._sleep(250 * 2**attempt)
                 continue
             if response.status_code == 429 and attempt < 2:
-                retry_delay = _retry_after(response, self._now())
+                retry_delay = parse_retry_after(response, self._now())
                 await self._sleep(retry_delay if retry_delay is not None else 250 * 2**attempt)
                 continue
             if not response.is_success:
@@ -274,7 +271,7 @@ class OAuth:
         self, subject: str, on_complete: Callable[[TokenSet], Awaitable[TokenSet]]
     ) -> DeviceLogin:
         """Starts one subject's device flow and returns its polling handle."""
-        _validate_subject(subject)
+        validate_subject(subject)
         try:
             response = await self._client.post(
                 self.protocol.device_usercode_url,

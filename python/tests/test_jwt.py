@@ -1,6 +1,9 @@
 import json
 
-from chatgpt_oauth import TokenSet, base64url, extract_unverified_claims, redact
+from chatgpt_oauth import TokenSet
+from chatgpt_oauth.jwt import extract_unverified_claims
+from chatgpt_oauth.pkce import base64url
+from chatgpt_oauth.redact import redact
 
 
 def jwt(payload: object) -> str:

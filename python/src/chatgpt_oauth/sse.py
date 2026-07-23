@@ -50,26 +50,42 @@ def _parse_block(block: str) -> ResponseEvent | str | None:
 
 
 async def parse_sse(body: AsyncIterable[bytes]) -> AsyncIterator[ResponseEvent]:
-    """Yields SSE events, forwarding opaque data and unknown event types."""
+    """Yields SSE events, forwarding opaque data and unknown event types.
+
+    Only the newly appended suffix of each chunk is normalized and scanned for a
+    ``\\n\\n`` boundary — re-scanning the whole accumulated buffer on every chunk
+    is O(n^2) for one large event split across many small chunks. A bare ``\\r``
+    at a chunk boundary is deferred (`pending_cr`) until the next chunk arrives,
+    since a following ``\\n`` must still collapse with it into a single newline.
+    """
     decoder = codecs.getincrementaldecoder("utf-8")()
     buffer = ""
+    pending_cr = False
+    search_from = 0
     async for chunk in body:
-        buffer += decoder.decode(chunk)
-        buffer = buffer.replace("\r\n", "\n")
-        if buffer.endswith("\r"):
-            preserved = "\r"
-            buffer = buffer[:-1].replace("\r", "\n") + preserved
-        else:
-            buffer = buffer.replace("\r", "\n")
-        boundary = buffer.find("\n\n")
+        decoded = decoder.decode(chunk)
+        if pending_cr:
+            decoded = "\r" + decoded
+            pending_cr = False
+        if not decoded:
+            continue
+        if decoded.endswith("\r"):
+            pending_cr = True
+            decoded = decoded[:-1]
+        buffer += decoded.replace("\r\n", "\n").replace("\r", "\n")
+        boundary = buffer.find("\n\n", search_from)
         while boundary != -1:
             event = _parse_block(buffer[:boundary])
             buffer = buffer[boundary + 2 :]
+            search_from = 0
             if event == "done":
                 return
             if isinstance(event, ResponseEvent):
                 yield event
-            boundary = buffer.find("\n\n")
+            boundary = buffer.find("\n\n", search_from)
+        search_from = max(0, len(buffer) - 1)
+    if pending_cr:
+        buffer += "\n"
     buffer += decoder.decode(b"", final=True)
     buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
     final = _parse_block(buffer)

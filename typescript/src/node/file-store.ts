@@ -182,7 +182,7 @@ async function withLock<T>(path: string, operation: () => Promise<T>): Promise<T
   finally { await releaseLock(path, owner); }
 }
 
-export async function createFileCredentialStore(options: FileStoreOptions): Promise<CredentialStore> {
+export async function createFileStore(options: FileStoreOptions): Promise<CredentialStore> {
   await mkdir(options.directory, { recursive: true, mode: 0o700 });
   await chmod(options.directory, 0o700);
   const dataFile = join(options.directory, "credentials.enc");

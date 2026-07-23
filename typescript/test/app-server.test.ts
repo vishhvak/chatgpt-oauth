@@ -24,6 +24,7 @@ function authSession(overrides: Partial<AuthSession> = {}): AuthSession {
     async startDeviceLogin() { throw new Error("unused"); },
     async getAccessToken() { return "access-old"; },
     async refreshAccessToken() { return "access-fresh"; },
+    async getTokenSet() { throw new Error("unused"); },
     async status() { return status; },
     async logout() {},
     ...overrides,

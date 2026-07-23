@@ -15,10 +15,10 @@ private val lenientJson = Json { ignoreUnknownKeys = true }
  * @property planType Optional unverified display plan.
  * @property email Optional unverified display email.
  */
-public data class UnverifiedClaims(
-    public val accountId: String? = null,
-    public val planType: String? = null,
-    public val email: String? = null,
+internal data class UnverifiedClaims(
+    val accountId: String? = null,
+    val planType: String? = null,
+    val email: String? = null,
 )
 
 private fun decodePayload(token: String): JsonObject? {
@@ -29,7 +29,7 @@ private fun decodePayload(token: String): JsonObject? {
 }
 
 /** Extracts unverified display/routing claims; they never authorize, choose a subject, or determine row ownership. */
-public fun extractUnverifiedClaims(idToken: String? = null, accessToken: String? = null): UnverifiedClaims {
+internal fun extractUnverifiedClaims(idToken: String? = null, accessToken: String? = null): UnverifiedClaims {
     val payload = decodePayload(idToken.orEmpty()) ?: decodePayload(accessToken.orEmpty()) ?: JsonObject(emptyMap())
     val auth = runCatching { payload[CLAIM_NAMESPACE]?.jsonObject }.getOrNull()
     return UnverifiedClaims(

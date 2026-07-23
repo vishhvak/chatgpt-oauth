@@ -19,7 +19,7 @@ function keyFor(prefix: string, subject: string): string {
   return `${prefix}.${base64url(new TextEncoder().encode(subject))}`;
 }
 
-export function createSecureStoreCredentialStore(
+export function createSecureStore(
   secureStore: SecureStoreLike,
   options: SecureStoreOptions = {},
 ): CredentialStore {

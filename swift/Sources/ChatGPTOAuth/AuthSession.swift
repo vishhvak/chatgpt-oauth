@@ -75,10 +75,15 @@ public actor AuthSession {
         }
     }
 
-    /// Returns a usable access token for the explicit subject, opportunistically refreshing near expiry.
-    public func getAccessToken(subject: String) async throws -> String {
+    /// Returns the current token set for the explicit subject in one store read, opportunistically
+    /// refreshing near expiry, or forcing a network refresh (including after a skipped non-forced
+    /// flight) when `forceRefresh` is set.
+    public func tokenSet(for subject: String, forceRefresh: Bool = false) async throws -> TokenSet {
         try requireSubject(subject)
         if disabled() { throw ChatGPTOAuthError.disabled }
+        if forceRefresh {
+            return try await inFlight(subject: subject, force: true).token
+        }
         guard let token = try await store.load(subject: subject) else {
             throw ChatGPTOAuthError.reauthRequired(subject: subject, reason: "missing_credentials")
         }
@@ -89,16 +94,19 @@ public actor AuthSession {
             )
         }
         if token.expiresAt - now() >= refreshMarginMilliseconds {
-            return token.accessToken
+            return token
         }
-        return try await inFlight(subject: subject, force: false).token.accessToken
+        return try await inFlight(subject: subject, force: false).token
+    }
+
+    /// Returns a usable access token for the explicit subject, opportunistically refreshing near expiry.
+    public func getAccessToken(subject: String) async throws -> String {
+        try await tokenSet(for: subject).accessToken
     }
 
     /// Forces a network refresh for the explicit subject, including after a skipped non-forced flight.
     public func refreshAccessToken(subject: String) async throws -> String {
-        try requireSubject(subject)
-        if disabled() { throw ChatGPTOAuthError.disabled }
-        return try await inFlight(subject: subject, force: true).token.accessToken
+        try await tokenSet(for: subject, forceRefresh: true).accessToken
     }
 
     /// Reports connected or quarantined status for exactly one explicit subject.
@@ -232,11 +240,5 @@ public actor AuthSession {
 
     private func clearFlight(subject: String, id: UUID) {
         if flights[subject]?.id == id { flights.removeValue(forKey: subject) }
-    }
-
-    private func requireSubject(_ subject: String) throws {
-        guard !subject.isEmpty else {
-            throw ChatGPTOAuthError.authentication(message: "Credential subject must not be empty.")
-        }
     }
 }

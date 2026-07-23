@@ -1,10 +1,10 @@
 /** Bridges subject-scoped ChatGPT credentials into the Vercel AI SDK's OpenAI Responses provider. */
 import { createOpenAI } from "@ai-sdk/openai";
-import { parseRateLimitHeaders } from "../core/client.js";
+import { parseRateLimitHeaders, withAuthRetry } from "../core/client.js";
 import { PROTOCOL, type ProtocolOverrides } from "../core/constants.js";
 import { parseSSE } from "../core/sse.js";
 import { redact } from "../core/redact.js";
-import { AuthError, TransportError, type AuthSession, type RateLimitSnapshot } from "../core/types.js";
+import { TransportError, type AuthSession, type RateLimitSnapshot } from "../core/types.js";
 
 export interface ChatGPTProviderOptions {
   /** Injected transport, primarily for tests. */
@@ -91,29 +91,18 @@ export function createChatGPT(
     if (!target.searchParams.has("client_version")) target.searchParams.set("client_version", clientVersion);
     input = target.toString();
 
-    async function send(retried: boolean): Promise<Response> {
-      const accessToken = retried
-        ? await auth.refreshAccessToken(subject)
-        : await auth.getAccessToken(subject);
-      const status = await auth.status(subject);
-      const response = await request(input, {
-        ...init,
-        ...(rewritten === undefined ? {} : { body: rewritten.body }),
-        headers: {
-          ...Object.fromEntries(new Headers(init?.headers)),
-          authorization: `Bearer ${accessToken}`,
-          ...(status?.accountId === undefined ? {} : { "chatgpt-account-id": status.accountId }),
-          "openai-beta": "responses=experimental",
-          originator: "codex_cli_rs",
-          session_id: sessionId,
-        },
-      });
-      if (response.status !== 401) return response;
-      if (retried) throw new AuthError("Authentication was rejected after one refresh retry.");
-      return send(true);
-    }
-
-    const response = await send(false);
+    const response = await withAuthRetry(auth, subject, (tokenSet) => request(input, {
+      ...init,
+      ...(rewritten === undefined ? {} : { body: rewritten.body }),
+      headers: {
+        ...Object.fromEntries(new Headers(init?.headers)),
+        authorization: `Bearer ${tokenSet.accessToken}`,
+        ...(tokenSet.accountId === undefined ? {} : { "chatgpt-account-id": tokenSet.accountId }),
+        "openai-beta": "responses=experimental",
+        originator: "codex_cli_rs",
+        session_id: sessionId,
+      },
+    }));
     captureRateLimits(response);
     if (!response.ok || rewritten === undefined || rewritten.streaming) return response;
     return collapse(response);

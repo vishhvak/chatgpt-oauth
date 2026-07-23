@@ -48,7 +48,8 @@ export interface OAuthRuntime {
   protocol?: ProtocolOverrides;
 }
 
-function retryAfter(response: Response): number | undefined {
+/** RFC 7231 Retry-After: numeric seconds or an HTTP-date, normalized to milliseconds from now. */
+export function retryAfter(response: Response): number | undefined {
   const value = response.headers.get("retry-after");
   if (value === null) return undefined;
   const seconds = Number(value);

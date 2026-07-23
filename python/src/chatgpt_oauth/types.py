@@ -11,6 +11,12 @@ JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 ResponseContent: TypeAlias = str | Sequence[Mapping[str, JsonValue]]
 
 
+def validate_subject(subject: str) -> None:
+    """Rejects the empty subject; every credential operation requires an explicit identity."""
+    if not subject:
+        raise ValueError("subject must be nonempty")
+
+
 @dataclass(frozen=True, slots=True)
 class TokenSet:
     """Stores one subject's credential generation without revealing secrets in repr."""

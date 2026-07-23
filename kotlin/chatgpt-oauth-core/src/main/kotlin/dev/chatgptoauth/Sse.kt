@@ -78,16 +78,27 @@ private class Utf8IncrementalDecoder {
 }
 
 /** Incrementally parses UTF-8 SSE chunks, forwarding unknown events and honoring `[DONE]`. */
-public fun parseSse(chunks: Flow<ByteArray>): Flow<ResponseEvent> = flow {
+internal fun parseSse(chunks: Flow<ByteArray>): Flow<ResponseEvent> = flow {
     val decoder = Utf8IncrementalDecoder()
     var buffer = ""
     var stopped = false
 
-    fun drain(final: Boolean): List<ResponseEvent> {
+    // Normalizes and appends only the newly decoded [text] (plus any bare trailing '\r' held back from
+    // the previous call, in case it is completing a '\r\n' split across a chunk boundary), then drains
+    // every complete block. Without this, normalizing the whole accumulated buffer on every chunk makes
+    // one large event split across many small chunks cost O(bufferSize) per chunk, i.e. O(n^2) overall.
+    fun consume(text: String, final: Boolean): List<ResponseEvent> {
+        val pendingCr = buffer.isNotEmpty() && buffer.last() == '\r'
+        val raw = if (pendingCr) "\r$text" else text
+        if (pendingCr) buffer = buffer.dropLast(1)
+        // buffer is always already normalized here (invariant maintained below), so the search only
+        // needs to start at the join between the old buffer and this newly normalized suffix.
+        val searchFrom = maxOf(0, buffer.length - 1)
+        val collapsed = raw.replace("\r\n", "\n")
+        buffer += if (final) collapsed.replace('\r', '\n') else collapsed.replace(Regex("\\r(?!$)"), "\n")
+
         val events = mutableListOf<ResponseEvent>()
-        buffer = buffer.replace("\r\n", "\n")
-        buffer = if (final) buffer.replace('\r', '\n') else buffer.replace(Regex("\\r(?!$)"), "\n")
-        var boundary = buffer.indexOf("\n\n")
+        var boundary = buffer.indexOf("\n\n", searchFrom)
         while (boundary != -1 && !stopped) {
             when (val parsed = parseBlock(buffer.substring(0, boundary))) {
                 ParsedBlock.Done -> stopped = true
@@ -102,16 +113,14 @@ public fun parseSse(chunks: Flow<ByteArray>): Flow<ResponseEvent> = flow {
 
     try {
         chunks.collect { chunk ->
-            buffer += decoder.decode(chunk, false)
-            drain(false).forEach { emit(it) }
+            consume(decoder.decode(chunk, false), false).forEach { emit(it) }
             if (stopped) throw SseDone()
         }
     } catch (_: SseDone) {
         return@flow
     }
     if (!stopped) {
-        buffer += decoder.decode(ByteArray(0), true)
-        drain(true).forEach { emit(it) }
+        consume(decoder.decode(ByteArray(0), true), true).forEach { emit(it) }
         if (!stopped && buffer.isNotEmpty()) {
             when (val parsed = parseBlock(buffer)) {
                 is ParsedBlock.Event -> emit(parsed.value)

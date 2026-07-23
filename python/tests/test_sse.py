@@ -11,8 +11,8 @@ from chatgpt_oauth import (
     TokenSet,
     create_client,
     create_memory_store,
-    parse_sse,
 )
+from chatgpt_oauth.sse import parse_sse
 
 
 async def chunks() -> AsyncIterator[bytes]:
@@ -36,6 +36,25 @@ async def test_chunk_split_multiline_done_and_unknown_events() -> None:
     assert events[0].delta == "Hi"
     assert events[1].type == "future.event"
     assert events[1].data == "first\nsecond"
+
+
+async def _one_byte_at_a_time(payload: bytes) -> AsyncIterator[bytes]:
+    for index in range(len(payload)):
+        yield payload[index : index + 1]
+
+
+@pytest.mark.asyncio
+async def test_large_event_split_across_many_small_chunks() -> None:
+    large_delta = "x" * 50_000
+    payload = (
+        'data: {"type":"response.output_text.delta","delta":"'
+        + large_delta
+        + '"}\n\ndata: [DONE]\n\n'
+    ).encode()
+    events = [event async for event in parse_sse(_one_byte_at_a_time(payload))]
+    assert len(events) == 1
+    assert events[0].type == "response.output_text.delta"
+    assert events[0].delta == large_delta
 
 
 @pytest.mark.asyncio

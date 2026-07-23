@@ -1,9 +1,23 @@
 package dev.chatgptoauth
 
-import kotlinx.coroutines.flow.Flow
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+
+/** Requires that [subject] is a nonempty server-derived identifier, shared by every credential entry point. */
+public fun requireSubject(subject: String) {
+    require(subject.isNotBlank()) { "subject must be a nonempty server-derived identifier." }
+}
+
+/** Parses an RFC-7231 `Retry-After` header value (delay-seconds or HTTP-date) into milliseconds from [nowMs]. */
+internal fun parseRetryAfterMs(raw: String?, nowMs: Long): Long? {
+    raw ?: return null
+    raw.toDoubleOrNull()?.takeIf(Double::isFinite)?.let { return maxOf(0L, (it * 1_000).toLong()) }
+    val instant = runCatching { ZonedDateTime.parse(raw, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant() }.getOrNull()
+    return instant?.toEpochMilli()?.minus(nowMs)?.coerceAtLeast(0L)
+}
 
 /**
  * Holds one subject's credential generation without exposing tokens in its string form.
@@ -182,15 +196,6 @@ public data class RateLimitSnapshot(
     public val planType: String? = null,
     public val limitName: String? = null,
 )
-
-/** Provides collected and Flow-based access to a subject-bound subscription. */
-public interface SubscriptionAI {
-    /** Streams one response internally and returns its collected result. */
-    public suspend fun respond(req: ResponseRequest): ResponseResult
-
-    /** Returns a cold Flow of parsed response events. */
-    public fun stream(req: ResponseRequest): Flow<ResponseEvent>
-}
 
 /** Defines stable machine-readable error codes whose [value] matches the TypeScript wire name. */
 public enum class ErrorCode(public val value: String) {

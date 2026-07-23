@@ -143,12 +143,6 @@ public actor KeychainCredentialStore: CredentialStore {
         ChatGPTOAuthError.store(message: "Keychain \(operation) failed with status \(status).")
     }
 
-    private func requireSubject(_ subject: String) throws {
-        guard !subject.isEmpty else {
-            throw ChatGPTOAuthError.store(message: "Credential subject must not be empty.")
-        }
-    }
-
     private func withExclusiveLock<T>(_ operation: () throws -> T) throws -> T {
         let directory = try lockDirectory()
         let digest = SHA256.hash(data: Data(service.utf8)).map { String(format: "%02x", $0) }.joined()

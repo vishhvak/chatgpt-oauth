@@ -7,6 +7,7 @@ import dev.chatgptoauth.CompareAndSwapResult
 import dev.chatgptoauth.CredentialStore
 import dev.chatgptoauth.StoreError
 import dev.chatgptoauth.TokenSet
+import dev.chatgptoauth.requireSubject
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -98,10 +99,6 @@ public class EncryptedCredentialStore(
     }
 
     private fun key(subject: String): String = "subject:$subject"
-
-    private fun requireSubject(subject: String) {
-        require(subject.isNotBlank()) { "subject must be a nonempty server-derived identifier." }
-    }
 
     private fun safeCause(cause: Throwable): Throwable = IllegalStateException(cause::class.simpleName ?: "storage failure")
 

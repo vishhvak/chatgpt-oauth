@@ -3,6 +3,7 @@ package dev.chatgptoauth.store
 import dev.chatgptoauth.CompareAndSwapResult
 import dev.chatgptoauth.CredentialStore
 import dev.chatgptoauth.TokenSet
+import dev.chatgptoauth.requireSubject
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -35,9 +36,5 @@ public class MemoryCredentialStore(initial: Map<String, TokenSet> = emptyMap()) 
     override suspend fun delete(subject: String) {
         requireSubject(subject)
         mutex.withLock { records.remove(subject) }
-    }
-
-    private fun requireSubject(subject: String) {
-        require(subject.isNotBlank()) { "subject must be a nonempty server-derived identifier." }
     }
 }

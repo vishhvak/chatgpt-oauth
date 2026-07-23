@@ -3,10 +3,10 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { createAuthSession, createClient } from "chatgpt-oauth";
-import { createFileCredentialStore, waitForLoopbackCallback } from "chatgpt-oauth/node";
+import { createFileStore, waitForLoopbackCallback } from "chatgpt-oauth/node";
 
 const subject = "default";
-const store = await createFileCredentialStore({
+const store = await createFileStore({
   directory: join(homedir(), ".chatgpt-oauth-example"),
 });
 const auth = createAuthSession({ store });

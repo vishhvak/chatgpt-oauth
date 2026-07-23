@@ -12,27 +12,27 @@ import java.util.Base64
  * @property challenge Public S256 digest sent to authorization.
  * @property state Secret callback correlation value.
  */
-public data class PkceData(
-    public val verifier: String,
-    public val challenge: String,
-    public val state: String,
+internal data class PkceData(
+    val verifier: String,
+    val challenge: String,
+    val state: String,
 ) {
     override fun toString(): String = "PkceData(verifier=[REDACTED], challenge=$challenge, state=[REDACTED])"
 }
 
 /** Encodes bytes as RFC 4648 URL-safe Base64 without padding. */
-public fun base64Url(bytes: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+internal fun base64Url(bytes: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
 
 /** Decodes RFC 4648 URL-safe Base64 with omitted padding accepted. */
-public fun decodeBase64Url(value: String): ByteArray = Base64.getUrlDecoder().decode(value)
+internal fun decodeBase64Url(value: String): ByteArray = Base64.getUrlDecoder().decode(value)
 
 /** Computes the S256 PKCE challenge for a verifier. */
-public fun pkceChallenge(verifier: String): String = base64Url(
+internal fun pkceChallenge(verifier: String): String = base64Url(
     MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(StandardCharsets.UTF_8)),
 )
 
 /** Generates a fresh verifier, challenge, and state with a cryptographic RNG. */
-public fun createPkce(random: SecureRandom = SecureRandom()): PkceData {
+internal fun createPkce(random: SecureRandom = SecureRandom()): PkceData {
     val verifierBytes = ByteArray(64).also(random::nextBytes)
     val stateBytes = ByteArray(32).also(random::nextBytes)
     val verifier = base64Url(verifierBytes)
@@ -40,7 +40,7 @@ public fun createPkce(random: SecureRandom = SecureRandom()): PkceData {
 }
 
 /** Validates callback state without a data-dependent early exit. */
-public fun assertState(expected: String, actual: String?) {
+internal fun assertState(expected: String, actual: String?) {
     val left = expected.toByteArray(StandardCharsets.UTF_8)
     val right = (actual ?: "").toByteArray(StandardCharsets.UTF_8)
     var difference = left.size xor right.size

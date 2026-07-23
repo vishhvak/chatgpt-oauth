@@ -11,7 +11,7 @@ from typing import cast
 
 import httpx
 
-from .oauth import Clock, OAuth, Sleeper, TokenEndpointFailure, _validate_subject
+from .oauth import Clock, OAuth, Sleeper, TokenEndpointFailure
 from .protocol import PROTOCOL, ProtocolConfig
 from .types import (
     AuthError,
@@ -23,6 +23,7 @@ from .types import (
     Session,
     TokenRefreshError,
     TokenSet,
+    validate_subject,
 )
 
 
@@ -108,7 +109,7 @@ class AuthSession:
     ) -> TokenSet:
         """Exchanges and atomically persists one explicit subject's fresh login."""
         self._check_enabled()
-        _validate_subject(subject)
+        validate_subject(subject)
         return await self._persist_fresh(
             subject, await self._oauth.complete_login(subject, callback_url, pending)
         )
@@ -116,7 +117,7 @@ class AuthSession:
     async def start_device_login(self, subject: str) -> DeviceLogin:
         """Starts and binds a device login to one explicit subject."""
         self._check_enabled()
-        _validate_subject(subject)
+        validate_subject(subject)
 
         async def persist(token: TokenSet) -> TokenSet:
             self._check_enabled()
@@ -190,28 +191,31 @@ class AuthSession:
         self._flights[subject] = (force, created)
         return created
 
+    async def get_token_set(self, subject: str, force_refresh: bool = False) -> TokenSet:
+        """Reads one subject's token once, refreshing when stale or forced."""
+        validate_subject(subject)
+        self._check_enabled()
+        if not force_refresh:
+            token = await self._store.load(subject)
+            if token is None:
+                raise ReauthRequired(subject, "missing_credentials")
+            if token.quarantined_at is not None:
+                raise ReauthRequired(subject, token.quarantine_reason or "quarantined")
+            if token.expires_at - self._now() >= self._protocol.refresh_margin_ms:
+                return token
+        return (await self._in_flight(subject, force_refresh)).token
+
     async def get_access_token(self, subject: str) -> str:
         """Returns one subject's token, sharing refresh work when stale."""
-        _validate_subject(subject)
-        self._check_enabled()
-        token = await self._store.load(subject)
-        if token is None:
-            raise ReauthRequired(subject, "missing_credentials")
-        if token.quarantined_at is not None:
-            raise ReauthRequired(subject, token.quarantine_reason or "quarantined")
-        if token.expires_at - self._now() >= self._protocol.refresh_margin_ms:
-            return token.access_token
-        return (await self._in_flight(subject, False)).token.access_token
+        return (await self.get_token_set(subject)).access_token
 
     async def refresh_access_token(self, subject: str) -> str:
         """Forces one subject through the singleflight refresh path."""
-        _validate_subject(subject)
-        self._check_enabled()
-        return (await self._in_flight(subject, True)).token.access_token
+        return (await self.get_token_set(subject, force_refresh=True)).access_token
 
     async def status(self, subject: str) -> Session | None:
         """Loads safe status for one subject without exposing credentials."""
-        _validate_subject(subject)
+        validate_subject(subject)
         self._check_enabled()
         token = await self._store.load(subject)
         if token is None:
@@ -228,5 +232,5 @@ class AuthSession:
 
     async def logout(self, subject: str) -> None:
         """Deletes credentials for one explicit subject without remote revocation."""
-        _validate_subject(subject)
+        validate_subject(subject)
         await self._store.delete(subject)

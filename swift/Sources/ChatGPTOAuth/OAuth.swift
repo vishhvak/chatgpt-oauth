@@ -4,18 +4,18 @@ import FoundationNetworking
 #endif
 
 /// Supplies injectable transport, clock, sleep, and endpoints for OAuth operations and isolated tests.
-public struct OAuthRuntime: Sendable {
+struct OAuthRuntime: Sendable {
     /// The URL session used for every OAuth request.
-    public let session: URLSession
+    let session: URLSession
     /// The epoch-millisecond clock used for token and device deadlines.
-    public let now: @Sendable () -> Int64
+    let now: @Sendable () -> Int64
     /// The cancellable asynchronous sleeper used for bounded retry and device polling.
-    public let sleep: @Sendable (Int64) async throws -> Void
+    let sleep: @Sendable (Int64) async throws -> Void
     /// The complete wire-protocol configuration.
-    public let protocolConfiguration: ProtocolConfiguration
+    let protocolConfiguration: ProtocolConfiguration
 
     /// Creates an OAuth runtime with production dependencies unless explicitly replaced.
-    public init(
+    init(
         session: URLSession = .shared,
         now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) },
         sleep: @escaping @Sendable (Int64) async throws -> Void = { milliseconds in
@@ -31,18 +31,18 @@ public struct OAuthRuntime: Sendable {
 }
 
 /// Exposes a refresh token-endpoint failure so lifecycle code can quarantine only terminal generations.
-public struct TokenEndpointFailure: Error, Sendable, Equatable, LocalizedError {
+struct TokenEndpointFailure: Error, Sendable, Equatable, LocalizedError {
     /// The token endpoint HTTP status.
-    public let status: Int
+    let status: Int
     /// The parsed OAuth error code when present.
-    public let errorCode: String?
+    let errorCode: String?
     /// Whether the exact failed credential generation requires quarantine.
-    public let terminal: Bool
+    let terminal: Bool
     /// The already-redacted diagnostic message.
-    public let message: String
+    let message: String
 
     /// Creates a classified and redacted token endpoint failure.
-    public init(status: Int, errorCode: String?, terminal: Bool, message: String) {
+    init(status: Int, errorCode: String?, terminal: Bool, message: String) {
         self.status = status
         self.errorCode = errorCode
         self.terminal = terminal
@@ -50,19 +50,19 @@ public struct TokenEndpointFailure: Error, Sendable, Equatable, LocalizedError {
     }
 
     /// Returns the already-redacted endpoint diagnostic.
-    public var errorDescription: String? { message }
+    var errorDescription: String? { message }
 }
 
 /// Owns OAuth browser, token, refresh, and device-flow wire operations without persisting credentials.
-public struct OAuth: Sendable {
+struct OAuth: Sendable {
     /// The complete protocol configuration used by this OAuth client.
-    public let protocolConfiguration: ProtocolConfiguration
+    let protocolConfiguration: ProtocolConfiguration
     private let session: URLSession
     private let now: @Sendable () -> Int64
     private let sleep: @Sendable (Int64) async throws -> Void
 
     /// Creates an OAuth client from injectable runtime dependencies.
-    public init(runtime: OAuthRuntime = OAuthRuntime()) {
+    init(runtime: OAuthRuntime = OAuthRuntime()) {
         session = runtime.session
         now = runtime.now
         sleep = runtime.sleep
@@ -70,7 +70,7 @@ public struct OAuth: Sendable {
     }
 
     /// Generates PKCE and returns the system-browser authorization URL.
-    public func beginLogin(redirectURI: URL? = nil) async throws -> PendingLogin {
+    func beginLogin(redirectURI: URL? = nil) async throws -> PendingLogin {
         let redirectURI = redirectURI ?? protocolConfiguration.loopbackRedirectURL
         let generated = try PKCE.generate()
         var components = URLComponents(url: protocolConfiguration.authorizationURL, resolvingAgainstBaseURL: false)
@@ -92,7 +92,7 @@ public struct OAuth: Sendable {
     }
 
     /// Validates state before callback fields, then exchanges a nonempty authorization code.
-    public func completeLogin(callbackURL: URL, pending: PendingLogin) async throws -> TokenSet {
+    func completeLogin(callbackURL: URL, pending: PendingLogin) async throws -> TokenSet {
         let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
         try PKCE.assertState(expected: pending.state, actual: value("state"))
@@ -106,7 +106,7 @@ public struct OAuth: Sendable {
     }
 
     /// Refreshes a credential generation with at most three transient attempts and preserves an omitted refresh token.
-    public func refresh(_ previous: TokenSet) async throws -> TokenSet {
+    func refresh(_ previous: TokenSet) async throws -> TokenSet {
         for attempt in 0..<3 {
             let request = formRequest(url: protocolConfiguration.tokenURL, values: [
                 "grant_type": "refresh_token",
@@ -148,7 +148,7 @@ public struct OAuth: Sendable {
     }
 
     /// Starts device authorization and returns a value that polls and persists only after successful exchange.
-    public func startDeviceLogin(
+    func startDeviceLogin(
         onComplete: @escaping @Sendable (TokenSet) async throws -> TokenSet
     ) async throws -> DeviceLogin {
         var request = URLRequest(url: protocolConfiguration.deviceUserCodeURL)
@@ -371,20 +371,6 @@ private func endpointFailure(data: Data, response: HTTPURLResponse, context: Str
         )
     }
     throw ChatGPTOAuthError.authentication(message: "\(context) failed (\(response.statusCode)): \(snippet)")
-}
-
-private func retryAfterMilliseconds(_ response: HTTPURLResponse) -> Int64? {
-    guard let value = response.value(forHTTPHeaderField: "Retry-After") else { return nil }
-    if let seconds = Double(value), seconds.isFinite {
-        let milliseconds = max(0, seconds * 1_000)
-        return milliseconds >= Double(Int64.max) ? Int64.max : Int64(milliseconds)
-    }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(secondsFromGMT: 0)
-    formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss z"
-    guard let date = formatter.date(from: value) else { return nil }
-    return Int64(max(0, date.timeIntervalSinceNow * 1_000))
 }
 
 private func numericValue(_ value: Any?) -> Double? {

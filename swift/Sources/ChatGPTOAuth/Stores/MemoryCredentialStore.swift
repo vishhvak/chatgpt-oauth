@@ -38,10 +38,4 @@ public actor MemoryCredentialStore: CredentialStore {
         try requireSubject(subject)
         records.removeValue(forKey: subject)
     }
-
-    private func requireSubject(_ subject: String) throws {
-        guard !subject.isEmpty else {
-            throw ChatGPTOAuthError.store(message: "Credential subject must not be empty.")
-        }
-    }
 }

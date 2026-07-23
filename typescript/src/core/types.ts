@@ -57,6 +57,8 @@ export interface AuthSession {
   startDeviceLogin(subject: string): Promise<DeviceLogin>;
   getAccessToken(subject: string): Promise<string>;
   refreshAccessToken(subject: string): Promise<string>;
+  /** One store read (or one refresh) for both the bearer and `accountId`; `forceRefresh` skips the freshness check. */
+  getTokenSet(subject: string, forceRefresh?: boolean): Promise<TokenSet>;
   status(subject: string): Promise<Session | null>;
   logout(subject: string): Promise<void>;
 }
@@ -102,6 +104,8 @@ export interface RateLimitSnapshot {
 export interface SubscriptionAI {
   respond(req: ResponseRequest): Promise<ResponseResult>;
   stream(req: ResponseRequest): AsyncIterable<ResponseEvent>;
+  /** Direct-backend clients expose the rate-limit snapshot from the most recent response. */
+  readonly lastRateLimits?: RateLimitSnapshot | undefined;
 }
 
 export type ErrorCode =

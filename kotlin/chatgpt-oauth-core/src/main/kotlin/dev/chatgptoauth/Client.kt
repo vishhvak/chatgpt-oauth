@@ -1,8 +1,6 @@
 package dev.chatgptoauth
 
 import java.io.InputStream
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
 import java.util.UUID
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.coroutines.CancellationException
@@ -20,27 +18,27 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import okio.Buffer
 
 /** Implements the subject-bound Responses transport with exactly one reactive auth retry. */
-public class SubscriptionAIClient(
+public class SubscriptionAI(
     private val auth: AuthSession,
     private val subject: String,
     private val client: OkHttpClient = OkHttpClient(),
     private val protocol: ProtocolConfig = auth.protocol,
     private val sessionId: String = UUID.randomUUID().toString(),
     private val onRateLimits: ((RateLimitSnapshot) -> Unit)? = null,
-) : SubscriptionAI {
+) {
     /** Holds the usage headers from the latest completed stream, when one has run. */
     @Volatile
     public var lastRateLimits: RateLimitSnapshot? = null
         private set
 
     init {
-        require(subject.isNotBlank()) { "subject must be a nonempty server-derived identifier." }
+        requireSubject(subject)
     }
 
-    override fun stream(req: ResponseRequest): Flow<ResponseEvent> = flow {
+    /** Returns a cold Flow of parsed response events. */
+    public fun stream(req: ResponseRequest): Flow<ResponseEvent> = flow {
         val response = send(req, false)
         val snapshot = parseRateLimitHeaders(response)
         try {
@@ -57,7 +55,8 @@ public class SubscriptionAIClient(
         }
     }.flowOn(Dispatchers.IO)
 
-    override suspend fun respond(req: ResponseRequest): ResponseResult {
+    /** Streams one response internally and returns its collected result. */
+    public suspend fun respond(req: ResponseRequest): ResponseResult {
         val events = mutableListOf<ResponseEvent>()
         val output = StringBuilder()
         var completed: JsonElement? = null
@@ -71,17 +70,16 @@ public class SubscriptionAIClient(
 
     private suspend fun send(req: ResponseRequest, retried: Boolean): Response {
         require(req.model.isNotBlank()) { "model must be nonempty." }
-        val accessToken = if (retried) auth.refreshAccessToken(subject) else auth.getAccessToken(subject)
-        val session = auth.status(subject)
+        val tokenSet = auth.getTokenSet(subject, forceRefresh = retried)
         val separator = if ("?" in protocol.responsesUrl) "&" else "?"
         // The backend rejects requests without client_version (400 missing query param).
         val request = Request.Builder().url("${protocol.responsesUrl}${separator}client_version=${protocol.clientVersion}")
-            .header("authorization", "Bearer $accessToken")
+            .header("authorization", "Bearer ${tokenSet.accessToken}")
             .header("openai-beta", "responses=experimental")
             .header("originator", "codex_cli_rs")
             .header("content-type", "application/json")
             .header("session_id", sessionId)
-            .apply { session?.accountId?.let { header("chatgpt-account-id", it) } }
+            .apply { tokenSet.accountId?.let { header("chatgpt-account-id", it) } }
             .post(requestBody(req).toString().toRequestBody("application/json".toMediaType()))
             .build()
         val response = try {
@@ -96,7 +94,7 @@ public class SubscriptionAIClient(
             return send(req, true)
         }
         if (response.code == 429) {
-            val retryAfter = parseRetryAfter(response.header("retry-after"))
+            val retryAfter = parseRetryAfterMs(response.header("retry-after"), System.currentTimeMillis())
             response.close()
             throw RateLimitError(retryAfter)
         }
@@ -155,27 +153,6 @@ private fun rateWindow(response: Response, prefix: String): RateLimitWindow? {
 
 private fun Response.finiteHeader(name: String): Double? = header(name)?.trim()?.takeIf(String::isNotEmpty)
     ?.toDoubleOrNull()?.takeIf(Double::isFinite)
-
-private fun parseRetryAfter(raw: String?): Long? {
-    raw ?: return null
-    raw.toDoubleOrNull()?.takeIf(Double::isFinite)?.let { return maxOf(0L, (it * 1_000).toLong()) }
-    val instant = runCatching { ZonedDateTime.parse(raw, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant() }.getOrNull()
-    return instant?.toEpochMilli()?.minus(System.currentTimeMillis())?.coerceAtLeast(0L)
-}
-
-private fun Response.readRedactedSnippet(readLimit: Long = 4_096L, outputLimit: Int = 1_024): String = use { response ->
-    val value = runCatching {
-        val source = response.body?.source() ?: return@runCatching ""
-        val sink = Buffer()
-        while (sink.size < readLimit) {
-            val read = source.read(sink, minOf(8_192L, readLimit - sink.size))
-            if (read == -1L) break
-        }
-        sink.readByteArray().toString(Charsets.UTF_8)
-    }
-        .getOrElse { " [response read failed: ${redact(it.message.orEmpty())}]" }
-    redact(value).take(outputLimit)
-}
 
 private fun InputStream.byteChunks(): Flow<ByteArray> = flow {
     use { input ->

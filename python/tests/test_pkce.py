@@ -2,7 +2,8 @@ import re
 
 import pytest
 
-from chatgpt_oauth import StateMismatchError, assert_state, create_pkce, pkce_challenge
+from chatgpt_oauth import StateMismatchError
+from chatgpt_oauth.pkce import assert_state, create_pkce, pkce_challenge
 
 
 def test_known_s256_vector_and_generated_lengths() -> None:

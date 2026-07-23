@@ -12,15 +12,14 @@ import {
   createAuthSession,
   createClient,
   createMemoryStore,
-  createPkce,
-  parseSSE,
-  pkceChallenge,
-  redact,
   type AuthSession,
   type CredentialStore,
   type TokenSet,
 } from "../src/index.js";
-import { createFileCredentialStore } from "../src/node/index.js";
+import { createFileStore } from "../src/node/index.js";
+import { createPkce, pkceChallenge } from "../src/core/pkce.js";
+import { redact } from "../src/core/redact.js";
+import { parseSSE } from "../src/core/sse.js";
 
 const subject = "app-user-42";
 
@@ -50,16 +49,29 @@ function streamResponse(parts: string[], status = 200, headers: HeadersInit = {}
 }
 
 function fakeSession(overrides: Partial<AuthSession> = {}): AuthSession {
-  return {
+  // `session` is captured by closure so getTokenSet always sees the final, overridden methods below.
+  const session: AuthSession = {
     async beginLogin() { throw new Error("unused"); },
     async completeLogin() { throw new Error("unused"); },
     async startDeviceLogin() { throw new Error("unused"); },
     async getAccessToken() { return "access-old"; },
     async refreshAccessToken() { return "access-new"; },
+    async getTokenSet(subj, forceRefresh) {
+      const accessToken = forceRefresh ? await session.refreshAccessToken(subj) : await session.getAccessToken(subj);
+      const status = await session.status(subj);
+      return {
+        accessToken,
+        refreshToken: "unused-refresh-token",
+        expiresAt: Date.now(),
+        version: 1,
+        ...(status?.accountId === undefined ? {} : { accountId: status.accountId }),
+      };
+    },
     async status() { return { subject, status: "connected", expiresAt: Date.now(), accountId: "account-route" }; },
     async logout() {},
     ...overrides,
   };
+  return session;
 }
 
 describe("v1 invariants", () => {
@@ -287,7 +299,7 @@ describe("v1 invariants", () => {
   it("10. enforces Node modes, encrypted roundtrip, and typed tamper failure", async () => {
     const directory = await mkdtemp(join(tmpdir(), "chatgpt-oauth-test-"));
     try {
-      const store = await createFileCredentialStore({ directory, env: {} });
+      const store = await createFileStore({ directory, env: {} });
       const staleLock = join(directory, "credentials.lock");
       await writeFile(staleLock, "", { mode: 0o600 });
       await utimes(staleLock, new Date(0), new Date(0));

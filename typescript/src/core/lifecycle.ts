@@ -133,6 +133,17 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
     return created.promise;
   }
 
+  async function getTokenSet(subject: string, forceRefresh = false): Promise<TokenSet> {
+    if (options.disabled?.() === true) throw new DisabledError();
+    if (forceRefresh) return (await inFlight(subject, true)).token;
+    // One load carries both the freshness check and, when already fresh, the whole token set.
+    const token = await options.store.load(subject);
+    if (token === null) throw new ReauthRequiredError(subject, "missing_credentials");
+    if (token.quarantinedAt !== undefined) throw new ReauthRequiredError(subject, token.quarantineReason ?? "quarantined");
+    if (token.expiresAt - now() >= (options.protocol?.REFRESH_MARGIN_MS ?? PROTOCOL.REFRESH_MARGIN_MS)) return token;
+    return (await inFlight(subject, false)).token;
+  }
+
   return {
     beginLogin: oauth.beginLogin,
     async completeLogin(subject, callbackUrl, pending) {
@@ -141,17 +152,12 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
     async startDeviceLogin(subject) {
       return oauth.startDeviceLogin((token) => persistFresh(subject, token));
     },
+    getTokenSet,
     async getAccessToken(subject) {
-      if (options.disabled?.() === true) throw new DisabledError();
-      const token = await options.store.load(subject);
-      if (token === null) throw new ReauthRequiredError(subject, "missing_credentials");
-      if (token.quarantinedAt !== undefined) throw new ReauthRequiredError(subject, token.quarantineReason ?? "quarantined");
-      if (token.expiresAt - now() >= (options.protocol?.REFRESH_MARGIN_MS ?? PROTOCOL.REFRESH_MARGIN_MS)) return token.accessToken;
-      return (await inFlight(subject, false)).token.accessToken;
+      return (await getTokenSet(subject)).accessToken;
     },
     async refreshAccessToken(subject) {
-      if (options.disabled?.() === true) throw new DisabledError();
-      return (await inFlight(subject, true)).token.accessToken;
+      return (await getTokenSet(subject, true)).accessToken;
     },
     async status(subject) {
       const token = await options.store.load(subject);

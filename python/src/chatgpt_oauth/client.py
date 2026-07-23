@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import email.utils
 import math
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
-from datetime import timezone
 
 import httpx
 
+from .oauth import parse_retry_after
 from .protocol import PROTOCOL, ProtocolConfig
 from .redact import redact
 from .session import AuthSession
@@ -25,6 +24,7 @@ from .types import (
     ResponseRequest,
     ResponseResult,
     TransportError,
+    validate_subject,
 )
 
 
@@ -57,25 +57,6 @@ def parse_rate_limit_headers(headers: httpx.Headers) -> RateLimitSnapshot:
     )
 
 
-def _retry_after(headers: httpx.Headers) -> int | None:
-    raw = headers.get("retry-after")
-    if raw is None:
-        return None
-    try:
-        seconds = float(raw)
-        if math.isfinite(seconds):
-            return max(0, int(seconds * 1000))
-    except ValueError:
-        pass
-    try:
-        parsed = email.utils.parsedate_to_datetime(raw)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return max(0, int(parsed.timestamp() * 1000 - time.time() * 1000))
-    except (TypeError, ValueError, OverflowError):
-        return None
-
-
 class SubscriptionAI:
     """Streams subscription responses for one immutable, explicit subject."""
 
@@ -89,8 +70,7 @@ class SubscriptionAI:
         session_id: str | None = None,
         on_rate_limits: Callable[[RateLimitSnapshot], None] | None = None,
     ) -> None:
-        if not subject:
-            raise ValueError("subject must be nonempty")
+        validate_subject(subject)
         self._session = session
         self._subject = subject
         self._client = client or httpx.AsyncClient()
@@ -129,21 +109,16 @@ class SubscriptionAI:
             pass
 
     async def _send(self, request: ResponseRequest, retried: bool) -> httpx.Response:
-        access_token = (
-            await self._session.refresh_access_token(self._subject)
-            if retried
-            else await self._session.get_access_token(self._subject)
-        )
-        status = await self._session.status(self._subject)
+        token_set = await self._session.get_token_set(self._subject, force_refresh=retried)
         headers = {
-            "authorization": f"Bearer {access_token}",
+            "authorization": f"Bearer {token_set.access_token}",
             "openai-beta": "responses=experimental",
             "originator": "codex_cli_rs",
             "content-type": "application/json",
             "session_id": self._session_id,
         }
-        if status is not None and status.account_id is not None:
-            headers["chatgpt-account-id"] = status.account_id
+        if token_set.account_id is not None:
+            headers["chatgpt-account-id"] = token_set.account_id
         body: dict[str, JsonValue] = {
             "model": request.model,
             # The backend rejects bare-string input ("Input must be a list").
@@ -185,7 +160,7 @@ class SubscriptionAI:
             return await self._send(request, True)
         if response.status_code == 429:
             await response.aclose()
-            raise RateLimitError(_retry_after(response.headers))
+            raise RateLimitError(parse_retry_after(response, int(time.time_ns() // 1_000_000)))
         if not response.is_success:
             content = await response.aread()
             await response.aclose()

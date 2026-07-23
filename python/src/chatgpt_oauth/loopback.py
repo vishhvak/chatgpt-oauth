@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlparse
 
 from .pkce import assert_state
-from .types import AuthError, PendingLogin, TransportError
+from .session import AuthSession
+from .types import AuthError, PendingLogin, TokenSet, TransportError
 
 _SUCCESS = (
     b"<!doctype html><meta charset=utf-8><title>Signed in</title>"
@@ -88,3 +90,27 @@ async def wait_for_loopback_callback(
         finally:
             server.close()
             await server.wait_closed()
+
+
+async def login_with_loopback(
+    auth: AuthSession,
+    subject: str,
+    *,
+    open: Callable[[str], None] | None = None,
+    port: int | None = None,
+    timeout: int | None = None,
+) -> TokenSet:
+    """Runs the full loopback quickstart: begin, present the URL, wait, complete.
+
+    `open` receives the authorize URL instead of the default `print`; pass e.g.
+    `webbrowser.open` to launch a browser. `timeout` is in milliseconds, matching
+    `wait_for_loopback_callback`'s `timeout_ms`.
+    """
+    pending = await auth.begin_login(subject)
+    if open is not None:
+        open(pending.url)
+    else:
+        print(f"Open {pending.url}")
+    timeout_ms = 300_000 if timeout is None else timeout
+    callback = await wait_for_loopback_callback(pending, port=port, timeout_ms=timeout_ms)
+    return await auth.complete_login(subject, callback, pending)

@@ -1,8 +1,9 @@
 /** Covers hostile loopback probes and tolerant token normalization. */
 import { createServer } from "node:net";
 import { describe, expect, it, vi } from "vitest";
-import { AuthError, createAuthSession, createMemoryStore, redact, type PendingLogin } from "../src/index.js";
-import { waitForLoopbackCallback } from "../src/node/index.js";
+import { AuthError, createAuthSession, createMemoryStore, type PendingLogin } from "../src/index.js";
+import { loginWithLoopback, waitForLoopbackCallback } from "../src/node/index.js";
+import { redact } from "../src/core/redact.js";
 
 const pending = (port: number): PendingLogin => ({
   url: "https://auth.example/authorize",
@@ -53,6 +54,31 @@ describe("OAuth edge cases", () => {
     const response = await fetch(`http://127.0.0.1:${port}/auth/callback?state=expected-state&error=access_denied`);
     expect(response.status).toBe(400);
     await rejection;
+  });
+
+  it("loginWithLoopback composes beginLogin, open, the loopback listener, and completeLogin", async () => {
+    const port = await unusedPort();
+    const store = createMemoryStore();
+    const auth = createAuthSession({
+      store,
+      fetch: async () => Response.json({ access_token: "access-loopback", refresh_token: "refresh-loopback", expires_in: 3_600 }),
+    });
+    const opened: string[] = [];
+
+    const tokens = await loginWithLoopback(auth, "loopback-user", {
+      port,
+      timeoutMs: 1_000,
+      open: async (url) => {
+        opened.push(url);
+        const state = new URL(url).searchParams.get("state") ?? "";
+        // The listener starts before `open` is awaited, so this callback is never racing it.
+        await fetch(`http://127.0.0.1:${port}/auth/callback?state=${state}&code=real-code`);
+      },
+    });
+
+    expect(opened).toHaveLength(1);
+    expect(tokens.accessToken).toBe("access-loopback");
+    expect((await store.load("loopback-user"))?.accessToken).toBe("access-loopback");
   });
 
   it("redacts a bare JWT-shaped token", () => {

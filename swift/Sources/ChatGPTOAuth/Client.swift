@@ -104,14 +104,11 @@ public final class SubscriptionAI: Sendable {
         _ responseRequest: ResponseRequest,
         retried: Bool
     ) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
-        let accessToken = retried
-            ? try await auth.refreshAccessToken(subject: subject)
-            : try await auth.getAccessToken(subject: subject)
-        let status = try await auth.status(subject: subject)
+        let tokenSet = try await auth.tokenSet(for: subject, forceRefresh: retried)
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
-        if let accountID = status?.accountID { request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id") }
+        request.setValue("Bearer \(tokenSet.accessToken)", forHTTPHeaderField: "authorization")
+        if let accountID = tokenSet.accountID { request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id") }
         request.setValue("responses=experimental", forHTTPHeaderField: "openai-beta")
         request.setValue("codex_cli_rs", forHTTPHeaderField: "originator")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
@@ -136,7 +133,7 @@ public final class SubscriptionAI: Sendable {
             return try await send(responseRequest, retried: true)
         }
         if http.statusCode == 429 {
-            throw ChatGPTOAuthError.rateLimit(retryAfterMilliseconds: Self.retryAfterMilliseconds(http))
+            throw ChatGPTOAuthError.rateLimit(retryAfterMilliseconds: retryAfterMilliseconds(http))
         }
         guard (200..<300).contains(http.statusCode) else {
             // Redact before truncation so a long credential cannot lose its delimiter first.
@@ -159,26 +156,8 @@ public final class SubscriptionAI: Sendable {
         return (bytes, http)
     }
 
-    private static func retryAfterMilliseconds(_ response: HTTPURLResponse) -> Int64? {
-        guard let raw = response.value(forHTTPHeaderField: "retry-after")?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !raw.isEmpty else { return nil }
-        if let seconds = Double(raw), seconds.isFinite {
-            let milliseconds = max(0, seconds * 1_000)
-            guard milliseconds < Double(Int64.max) else { return Int64.max }
-            return Int64(milliseconds)
-        }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss z"
-        guard let date = formatter.date(from: raw) else { return nil }
-        let milliseconds = max(0, date.timeIntervalSinceNow * 1_000)
-        guard milliseconds < Double(Int64.max) else { return Int64.max }
-        return Int64(milliseconds)
-    }
-
     /// Parses finite primary and secondary rate-limit response headers while ignoring malformed windows.
-    public static func parseRateLimitHeaders(_ response: HTTPURLResponse) -> RateLimitSnapshot {
+    static func parseRateLimitHeaders(_ response: HTTPURLResponse) -> RateLimitSnapshot {
         RateLimitSnapshot(
             primary: rateLimitWindow(response, prefix: "primary"),
             secondary: rateLimitWindow(response, prefix: "secondary")

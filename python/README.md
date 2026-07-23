@@ -15,33 +15,34 @@ pip install chatgpt-oauth
 import asyncio
 from pathlib import Path
 
+import httpx
+
 from chatgpt_oauth import (
     AuthSession,
     ResponseRequest,
     create_client,
-    create_file_credential_store,
-    wait_for_loopback_callback,
+    create_file_store,
+    login_with_loopback,
 )
 
 
 async def main() -> None:
     subject = "local-user"  # explicit app-owned identity; never ambient
-    store = await create_file_credential_store(Path.home() / ".my-app" / "chatgpt")
-    async with AuthSession(store=store) as auth:
-        pending = await auth.begin_login(subject)
-        print(f"Open {pending.url}")
-        callback = await wait_for_loopback_callback(pending)
-        await auth.complete_login(subject, callback, pending)
-
-        async with create_client(auth, subject) as ai:
-            result = await ai.respond(
-                ResponseRequest(model="gpt-5.4-mini", input="Explain CAS in one sentence.")
-            )
-            print(result.output_text)
+    store = await create_file_store(Path.home() / ".my-app" / "chatgpt")
+    async with httpx.AsyncClient() as client:
+        auth = AuthSession(store=store, client=client)
+        await login_with_loopback(auth, subject)
+        ai = create_client(auth, subject, client=client)
+        result = await ai.respond(
+            ResponseRequest(model="gpt-5.4-mini", input="Explain CAS in one sentence.")
+        )
+        print(result.output_text)
 
 
 asyncio.run(main())
 ```
+
+`login_with_loopback` composes `begin_login` &rarr; print (or `open=`) the authorize URL &rarr; `wait_for_loopback_callback` &rarr; `complete_login`. Passing one shared `httpx.AsyncClient` to both `AuthSession` and `create_client` keeps the example to a single `async with` — neither object owns (or closes) a client it didn't create, so nothing leaks.
 
 The file store creates a `0700` directory, a `0600` AES-256-GCM key, and an atomically replaced `0600` encrypted credential file. Set `CHATGPT_OAUTH_KEY` to base64, base64url, or 64-character hex encoding exactly 32 bytes to manage the key externally.
 

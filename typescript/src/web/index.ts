@@ -2,13 +2,6 @@
 import { assertState } from "../core/pkce.js";
 import { AuthError, type AuthSession, type PendingLogin, type TokenSet } from "../core/types.js";
 
-export async function createAuthorizationRedirect(
-  session: AuthSession,
-  redirectUri: string,
-): Promise<PendingLogin> {
-  return session.beginLogin(redirectUri);
-}
-
 export function parseAuthorizationCallback(callback: string | URL, expectedState: string): {
   code: string;
   url: URL;

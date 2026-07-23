@@ -1,5 +1,5 @@
 /** Serves the whole browser login lifecycle from one fetch handler, keeping tokens server-side. */
-import { createAuthorizationRedirect, completeAuthorizationRedirect } from "../web/index.js";
+import { completeAuthorizationRedirect } from "../web/index.js";
 import { AuthError, StateMismatchError, type AuthSession, type PendingLogin } from "../core/types.js";
 
 /** Custody for the in-flight `state`/`verifier` pair between the redirect and the callback. */
@@ -9,7 +9,7 @@ export interface PendingLoginStore {
   take(subject: string): Promise<PendingLogin | null>;
 }
 
-export interface ChatGPTHandlerOptions {
+interface ChatGPTHandlerBase {
   /**
    * Derives the application's own user identity from the request. This must come from
    * your trusted session — never from a query parameter, header, or request body.
@@ -19,11 +19,16 @@ export interface ChatGPTHandlerOptions {
   basePath?: string;
   /** Where the browser lands after a completed callback. */
   redirectTo?: string;
-  /** Defaults to an encrypted, short-lived, httpOnly cookie. Supply your own to use a database. */
-  pending?: PendingLoginStore;
-  /** Required by the default cookie store: 32+ random bytes, from your secret manager. */
-  secret?: string;
 }
+
+/**
+ * At least one of `secret` (the default encrypted-cookie store) or a custom `pending`
+ * store is required. Both may be supplied; `pending` takes precedence when they are.
+ */
+export type ChatGPTHandlerOptions =
+  // Pre-distributed (not `Base & (A | B)`) so narrowing on `pending`/`secret` works at call sites below.
+  | (ChatGPTHandlerBase & { /** Required by the default cookie store: 32+ random bytes, from your secret manager. */ secret: string; pending?: PendingLoginStore })
+  | (ChatGPTHandlerBase & { /** Defaults to an encrypted, short-lived, httpOnly cookie. Supply your own to use a database. */ pending: PendingLoginStore; secret?: string });
 
 const PENDING_COOKIE = "chatgpt_oauth_pending";
 const PENDING_TTL_SECONDS = 600;
@@ -105,6 +110,15 @@ function expiredCookie(url: URL): string {
 }
 
 /**
+ * `pending`/`secret` overlap structurally (both optional in one branch, one required in the
+ * other), so a plain `options.pending !== undefined` check does not eliminate a union member —
+ * an explicit predicate is what actually narrows `options.secret` to `string` on the else side.
+ */
+function hasPendingStore(options: ChatGPTHandlerOptions): options is ChatGPTHandlerOptions & { pending: PendingLoginStore } {
+  return options.pending !== undefined;
+}
+
+/**
  * Builds the `/login`, `/callback`, `/session`, and `/logout` routes as one fetch handler.
  *
  * Only safe session metadata (`status`, `email`, `planType`) ever reaches the browser.
@@ -115,9 +129,9 @@ export function createChatGPTHandler(
 ): (request: Request) => Promise<Response> {
   const basePath = (options.basePath ?? "/api/chatgpt").replace(/\/$/u, "");
   const redirectTo = options.redirectTo ?? "/";
-  const custom = options.pending;
-  if (custom === undefined && options.secret === undefined) {
+  if (options.pending === undefined && options.secret === undefined) {
     // A construction-time programmer error, not a runtime auth failure — so not a ChatGPTOAuthError.
+    // The type already requires one of the two; this only guards callers that bypass TypeScript.
     throw new TypeError("createChatGPTHandler requires either `secret` or a `pending` store.");
   }
 
@@ -134,22 +148,23 @@ export function createChatGPTHandler(
     }
 
     if (route === "/login" && request.method === "POST") {
-      const pending = await createAuthorizationRedirect(auth, `${url.origin}${basePath}/callback`);
-      if (custom !== undefined) {
-        await custom.save(subject, pending);
+      const pending = await auth.beginLogin(`${url.origin}${basePath}/callback`);
+      if (hasPendingStore(options)) {
+        await options.pending.save(subject, pending);
         return json({ url: pending.url });
       }
-      const cookie = await seal(options.secret as string, subject, pending);
+      const cookie = await seal(options.secret, subject, pending);
       return json({ url: pending.url }, 200, {
         "set-cookie": `${PENDING_COOKIE}=${cookie}; ${cookieAttributes(url, PENDING_TTL_SECONDS)}`,
       });
     }
 
     if (route === "/callback" && request.method === "GET") {
-      const raw = custom === undefined ? readCookie(request, PENDING_COOKIE) : null;
-      const pending = custom !== undefined
-        ? await custom.take(subject)
-        : raw === null ? null : await open(options.secret as string, subject, raw);
+      const usesPendingStore = hasPendingStore(options);
+      const raw = usesPendingStore ? null : readCookie(request, PENDING_COOKIE);
+      const pending = usesPendingStore
+        ? await options.pending.take(subject)
+        : raw === null ? null : await open(options.secret, subject, raw);
       if (pending === null) return json({ error: "no_pending_login" }, 400, { "set-cookie": expiredCookie(url) });
       try {
         await completeAuthorizationRedirect(auth, subject, url, pending);

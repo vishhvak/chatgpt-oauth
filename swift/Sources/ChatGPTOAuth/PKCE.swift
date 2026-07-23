@@ -29,7 +29,7 @@ public struct PKCE: Sendable, Equatable {
     }
 
     /// Compares OAuth state without a data-dependent early exit.
-    public static func assertState(expected: String, actual: String?) throws {
+    static func assertState(expected: String, actual: String?) throws {
         let left = Array(expected.utf8)
         let right = Array((actual ?? "").utf8)
         var difference = left.count ^ right.count

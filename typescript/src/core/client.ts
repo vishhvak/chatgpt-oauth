@@ -1,5 +1,6 @@
 /** Implements the backend-api SubscriptionAI transport and its single reactive auth retry. */
 import { PROTOCOL, type ProtocolOverrides } from "./constants.js";
+import { retryAfter } from "./oauth.js";
 import { redact, redactedResponseSnippet } from "./redact.js";
 import { parseSSE } from "./sse.js";
 import {
@@ -13,6 +14,7 @@ import {
   type ResponseRequest,
   type ResponseResult,
   type SubscriptionAI,
+  type TokenSet,
 } from "./types.js";
 
 export interface ClientOptions {
@@ -21,8 +23,6 @@ export interface ClientOptions {
   sessionId?: string;
   onRateLimits?: (snapshot: RateLimitSnapshot) => void;
 }
-
-export type BackendApiClient = SubscriptionAI & { readonly lastRateLimits: RateLimitSnapshot | undefined };
 
 function finiteHeader(headers: Headers, name: string): number | undefined {
   const value = headers.get(name);
@@ -53,12 +53,27 @@ export function parseRateLimitHeaders(headers: Headers): RateLimitSnapshot {
 }
 
 function rateLimit(response: Response): RateLimitError {
-  const raw = response.headers.get("retry-after");
-  if (raw === null) return new RateLimitError();
-  const seconds = Number(raw);
-  if (Number.isFinite(seconds)) return new RateLimitError(Math.max(0, seconds * 1_000));
-  const date = Date.parse(raw);
-  return new RateLimitError(Number.isNaN(date) ? undefined : Math.max(0, date - Date.now()));
+  return new RateLimitError(retryAfter(response));
+}
+
+/**
+ * Shares the "get a token set, issue the request, retry exactly once on 401 via a forced
+ * refresh" shape between the direct client and the AI SDK bridge. `issue` receives the
+ * current token set (bearer + `accountId`) and owns the actual fetch and its error handling.
+ */
+export async function withAuthRetry(
+  session: AuthSession,
+  subject: string,
+  issue: (tokenSet: TokenSet) => Promise<Response>,
+): Promise<Response> {
+  async function attempt(forceRefresh: boolean): Promise<Response> {
+    const tokenSet = await session.getTokenSet(subject, forceRefresh);
+    const response = await issue(tokenSet);
+    if (response.status !== 401) return response;
+    if (forceRefresh) throw new AuthError("Authentication was rejected after one refresh retry.");
+    return attempt(true);
+  }
+  return attempt(false);
 }
 
 /** The backend rejects bare-string input ("Input must be a list"); wrap it as one user message. */
@@ -67,7 +82,7 @@ function normalizeInput(input: ResponseRequest["input"]): ReadonlyArray<Record<s
   return [{ type: "message", role: "user", content: [{ type: "input_text", text: input }] }];
 }
 
-export function createClient(session: AuthSession, subject: string, options: ClientOptions = {}): BackendApiClient {
+export function createClient(session: AuthSession, subject: string, options: ClientOptions = {}): SubscriptionAI {
   const request = options.fetch ?? fetch;
   const baseEndpoint = options.protocol?.RESPONSES_URL ?? PROTOCOL.RESPONSES_URL;
   const clientVersion = options.protocol?.CLIENT_VERSION ?? PROTOCOL.CLIENT_VERSION;
@@ -83,44 +98,37 @@ export function createClient(session: AuthSession, subject: string, options: Cli
     catch { /* Deliberately isolated from transport success. */ }
   }
 
-  async function send(req: ResponseRequest, retried: boolean): Promise<Response> {
-    const accessToken = retried
-      ? await session.refreshAccessToken(subject)
-      : await session.getAccessToken(subject);
-    const status = await session.status(subject);
-    let response: Response;
-    try {
-      response = await request(endpoint, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          ...(status?.accountId === undefined ? {} : { "chatgpt-account-id": status.accountId }),
-          "openai-beta": "responses=experimental",
-          originator: "codex_cli_rs",
-          "content-type": "application/json",
-          session_id: sessionId,
-        },
-        body: JSON.stringify({
-          model: req.model,
-          ...(req.instructions === undefined ? {} : { instructions: req.instructions }),
-          input: normalizeInput(req.input),
-          ...(req.tools === undefined ? {} : { tools: req.tools }),
-          ...(req.tool_choice === undefined ? {} : { tool_choice: req.tool_choice }),
-          parallel_tool_calls: false,
-          store: false,
-          stream: true,
-          ...(req.reasoning === undefined ? {} : { reasoning: req.reasoning }),
-          ...(req.include === undefined ? {} : { include: req.include }),
-        }),
-      });
-    } catch (error) {
-      const message = redact(error instanceof Error ? error.message : String(error)).slice(0, 1_024);
-      throw new TransportError(`Subscription request failed: ${message}`);
-    }
-    if (response.status === 401) {
-      if (retried) throw new AuthError("Authentication was rejected after one refresh retry.");
-      return send(req, true);
-    }
+  async function send(req: ResponseRequest): Promise<Response> {
+    const response = await withAuthRetry(session, subject, async (tokenSet) => {
+      try {
+        return await request(endpoint, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${tokenSet.accessToken}`,
+            ...(tokenSet.accountId === undefined ? {} : { "chatgpt-account-id": tokenSet.accountId }),
+            "openai-beta": "responses=experimental",
+            originator: "codex_cli_rs",
+            "content-type": "application/json",
+            session_id: sessionId,
+          },
+          body: JSON.stringify({
+            model: req.model,
+            ...(req.instructions === undefined ? {} : { instructions: req.instructions }),
+            input: normalizeInput(req.input),
+            ...(req.tools === undefined ? {} : { tools: req.tools }),
+            ...(req.tool_choice === undefined ? {} : { tool_choice: req.tool_choice }),
+            parallel_tool_calls: false,
+            store: false,
+            stream: true,
+            ...(req.reasoning === undefined ? {} : { reasoning: req.reasoning }),
+            ...(req.include === undefined ? {} : { include: req.include }),
+          }),
+        });
+      } catch (error) {
+        const message = redact(error instanceof Error ? error.message : String(error)).slice(0, 1_024);
+        throw new TransportError(`Subscription request failed: ${message}`);
+      }
+    });
     if (response.status === 429) throw rateLimit(response);
     if (!response.ok) {
       // Redact before truncating so a long secret cannot lose its closing delimiter first.
@@ -132,7 +140,7 @@ export function createClient(session: AuthSession, subject: string, options: Cli
   }
 
   async function* stream(req: ResponseRequest): AsyncIterable<ResponseEvent> {
-    const response = await send(req, false);
+    const response = await send(req);
     const rateLimits = parseRateLimitHeaders(response.headers);
     if (response.body === null) {
       captureRateLimits(rateLimits);

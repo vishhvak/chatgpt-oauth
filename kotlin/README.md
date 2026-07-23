@@ -15,7 +15,7 @@ redirect(pending.url)
 
 // In the callback route:
 auth.completeLogin(subject, request.url, takeEncryptedPendingLogin(subject))
-val ai = SubscriptionAIClient(auth, subject)
+val ai = SubscriptionAI(auth, subject)
 println(ai.respond(ResponseRequest("gpt-5.4-mini", "Explain CAS in one sentence.")).outputText)
 ```
 

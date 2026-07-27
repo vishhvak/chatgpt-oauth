@@ -34,10 +34,15 @@ async def _reply(writer: asyncio.StreamWriter, status: str, content_type: str, b
     await writer.wait_closed()
 
 
-async def wait_for_loopback_callback(
-    pending: PendingLogin, *, port: int | None = None, timeout_ms: int = 300_000
-) -> str:
-    """Waits for the first valid callback while ignoring hostile local probes."""
+async def _start_loopback_listener(
+    pending: PendingLogin, port: int | None
+) -> tuple[asyncio.AbstractServer, asyncio.Future[str]]:
+    """Binds the callback listener and returns it alongside its pending result.
+
+    Binding is separated from waiting so a caller can open the browser only after the socket is
+    already accepting. Opening first races the redirect: a pre-authenticated ChatGPT session can
+    bounce back before the bind completes, and the browser gets ECONNREFUSED.
+    """
     bind_port = port if port is not None else int(urlparse(pending.redirect_uri).port or 1455)
     loop = asyncio.get_running_loop()
     result: asyncio.Future[str] = loop.create_future()
@@ -82,6 +87,12 @@ async def wait_for_loopback_callback(
         server = await asyncio.start_server(handle, "127.0.0.1", bind_port)
     except OSError as error:
         raise TransportError("OAuth loopback server failed.") from error
+    return server, result
+
+
+async def _await_loopback_result(
+    server: asyncio.AbstractServer, result: asyncio.Future[str], timeout_ms: int
+) -> str:
     async with server:
         try:
             return await asyncio.wait_for(result, timeout_ms / 1000)
@@ -90,6 +101,14 @@ async def wait_for_loopback_callback(
         finally:
             server.close()
             await server.wait_closed()
+
+
+async def wait_for_loopback_callback(
+    pending: PendingLogin, *, port: int | None = None, timeout_ms: int = 300_000
+) -> str:
+    """Waits for the first valid callback while ignoring hostile local probes."""
+    server, result = await _start_loopback_listener(pending, port)
+    return await _await_loopback_result(server, result, timeout_ms)
 
 
 async def login_with_loopback(
@@ -107,10 +126,18 @@ async def login_with_loopback(
     `wait_for_loopback_callback`'s `timeout_ms`.
     """
     pending = await auth.begin_login(subject)
-    if open is not None:
-        open(pending.url)
-    else:
-        print(f"Open {pending.url}")
+    # The listener binds before `open` runs so a fast-returning `open` can never race the callback
+    # it triggers.
+    server, result = await _start_loopback_listener(pending, port)
+    try:
+        if open is not None:
+            open(pending.url)
+        else:
+            print(f"Open {pending.url}")
+    except BaseException:
+        server.close()
+        await server.wait_closed()
+        raise
     timeout_ms = 300_000 if timeout is None else timeout
-    callback = await wait_for_loopback_callback(pending, port=port, timeout_ms=timeout_ms)
+    callback = await _await_loopback_result(server, result, timeout_ms)
     return await auth.complete_login(subject, callback, pending)

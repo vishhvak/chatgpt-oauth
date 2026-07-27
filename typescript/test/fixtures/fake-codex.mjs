@@ -9,6 +9,7 @@ const pidFile = process.env.FAKE_PID_FILE;
 let initialized = false;
 let buffer = "";
 let overloadAttempts = 0;
+let threadStartAttempts = 0;
 let turnCount = 0;
 
 if (process.argv.slice(2).join("|") !== 'app-server|-c|cli_auth_credentials_store="ephemeral"') {
@@ -23,6 +24,13 @@ if (envFile !== undefined) {
     codexHome: process.env.CODEX_HOME ?? null,
     argv: process.argv.slice(2),
   }));
+}
+
+if (scenario === "stderr-secret") {
+  // A credential-shaped value long enough that a 4096-char tail window keeps the value but drops
+  // the `"access_token":` label that every redaction pattern anchors on.
+  process.stderr.write(`{"access_token":"${"A".repeat(4_200)}TAILSECRET"}`);
+  process.exit(3);
 }
 
 if (scenario === "teardown" || scenario === "teardown-leader-exit") {
@@ -81,6 +89,15 @@ function handle(message) {
     return;
   }
   if (message.method === "thread/start") {
+    if (scenario === "thread-start-flaky") {
+      threadStartAttempts += 1;
+      // -32000 is not the overload code, so rpc.ts does not auto-retry it: the first attempt
+      // genuinely fails and the client must be able to start a fresh thread afterwards.
+      if (threadStartAttempts === 1) {
+        send({ id: message.id, error: { code: -32000, message: "transient thread/start failure" } });
+        return;
+      }
+    }
     if (scenario === "overloaded") {
       overloadAttempts += 1;
       send({ id: message.id, error: { code: -32001, message: `overloaded-${overloadAttempts} {"accessToken":"secret-overload"}` } });

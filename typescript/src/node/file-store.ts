@@ -12,7 +12,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { StoreError, type CredentialStore, type TokenSet } from "../core/types.js";
+import { StoreError, requireSubject, type CredentialStore, type TokenSet } from "../core/types.js";
 
 export interface FileStoreOptions {
   directory: string;
@@ -199,8 +199,12 @@ export async function createFileStore(options: FileStoreOptions): Promise<Creden
   }
 
   return {
-    async load(subject) { return structuredClone((await read())[subject] ?? null); },
+    async load(subject) {
+      requireSubject(subject);
+      return structuredClone((await read())[subject] ?? null);
+    },
     async compareAndSwap(subject, expectedVersion, next) {
+      requireSubject(subject);
       return withLock(lockFile, async () => {
         const records = await read();
         const current = Object.hasOwn(records, subject) ? records[subject] ?? null : null;
@@ -212,6 +216,7 @@ export async function createFileStore(options: FileStoreOptions): Promise<Creden
       });
     },
     async delete(subject) {
+      requireSubject(subject);
       await withLock(lockFile, async () => {
         const records = await read();
         delete records[subject];

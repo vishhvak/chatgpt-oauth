@@ -46,7 +46,7 @@ The npm tarball contains compiled package code, not `examples/`. Clone the [GitH
 
 ```sh
 git clone https://github.com/vishhvak/chatgpt-oauth.git
-cd chatgpt-oauth
+cd chatgpt-oauth/typescript
 pnpm install
 pnpm dlx tsx examples/node-cli/index.ts
 pnpm dlx tsx examples/node-cli/app-server.ts
@@ -66,7 +66,7 @@ const store: CredentialStore = await createApplicationCredentialStore();
 export const auth = createAuthSession({ store });
 ```
 
-`createApplicationCredentialStore()` is your encrypted database adapter. It must implement `load(subject)`, atomic `compareAndSwap(subject, expectedVersion, next)`, and `delete(subject)`. Copy the [PostgreSQL CAS reference](https://github.com/vishhvak/chatgpt-oauth/blob/main/examples/render-service/src/postgres-store.ts) and replace its key/database wiring for your application.
+`createApplicationCredentialStore()` is your encrypted database adapter. It must implement `load(subject)`, atomic `compareAndSwap(subject, expectedVersion, next)`, and `delete(subject)`. Copy the [PostgreSQL CAS reference](https://github.com/vishhvak/chatgpt-oauth/blob/main/typescript/examples/render-service/src/postgres-store.ts) and replace its key/database wiring for your application.
 
 One catch-all route serves the whole login lifecycle — `/login`, `/callback`, `/session`, and `/logout`:
 
@@ -215,7 +215,7 @@ try {
 }
 ```
 
-Each client uses an isolated `CODEX_HOME`; the child receives a minimal environment and ephemeral credential-store configuration. See the [app-server example on GitHub](https://github.com/vishhvak/chatgpt-oauth/blob/main/examples/node-cli/app-server.ts) for the runnable login-to-stream flow.
+Each client uses an isolated `CODEX_HOME`; the child receives a minimal environment and ephemeral credential-store configuration. See the [app-server example on GitHub](https://github.com/vishhvak/chatgpt-oauth/blob/main/typescript/examples/node-cli/app-server.ts) for the runnable login-to-stream flow.
 
 ## Deploy
 
@@ -243,6 +243,14 @@ Every request streams. `respond()` uses the same stream and collects output-text
 - `createClient(auth, subject, { onRateLimits?, ...options })` returns `respond()`, `stream()`, and the latest response-header snapshot as `lastRateLimits`. It has no standalone usage read.
 - `CredentialStore` requires `load(subject)`, `compareAndSwap(subject, expectedVersion, next)`, and `delete(subject)`.
 - `createMemoryStore()` is for tests and development only.
+- `requireSubject(subject)` throws `StoreError` on an empty or blank subject. Every built-in
+  entry point and store calls it; call it too in a custom `CredentialStore` so a missing
+  session can never collapse every user onto one shared credential row.
+- `extractUnverifiedClaims(token)` returns `{ accountId?, planType?, email? }` decoded from an
+  unverified JWT payload. Routing and display only — no claim may determine identity,
+  permissions, or row ownership.
+- `PROTOCOL` exposes the fixed endpoints, scope, and refresh margin; `protocolWith(overrides)`
+  returns a copy with selected values replaced, which is how tests point at a local server.
 - Typed failures: `StateMismatchError`, `ReauthRequiredError`, `TokenRefreshError`, `RateLimitError`, `AuthError`, `TransportError`, `DisabledError`, and `StoreError`. All inherit `ChatGPTOAuthError` and carry a `code` discriminant.
 
 ### `chatgpt-oauth/ai-sdk`

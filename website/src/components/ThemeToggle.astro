@@ -1,0 +1,99 @@
+---
+// The register's theme control: a bare colored dot. No icon, no dropdown. Amber in light, purple in
+// dark. Replaces Starlight's <select>, which was both off-register and easy to miss.
+//
+// Starlight renders this component more than once (header + mobile menu), so it must not use an id,
+// and the handler is delegated from document rather than bound per instance — otherwise only the
+// first, hidden copy ever gets a listener.
+---
+
+<button type="button" class="quiet-theme-toggle" aria-label="Toggle dark mode">
+  <span class="dot" aria-hidden="true"></span>
+</button>
+
+<style>
+  .quiet-theme-toggle {
+    /* 18px dot inside a 44px hit area. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    border-radius: 9999px;
+  }
+
+  .dot {
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 9999px;
+    background: var(--quiet-dot);
+    transition-property: background-color, scale;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .quiet-theme-toggle:focus-visible {
+    outline: 3px solid var(--quiet-dot);
+    outline-offset: -6px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dot {
+      transition-duration: 0ms;
+    }
+  }
+</style>
+
+<script is:inline>
+  // Bound once for the page, not once per instance, so it survives both duplicate renders and
+  // client-side navigation.
+  if (!window.__quietThemeBound) {
+    window.__quietThemeBound = true;
+
+    const apply = (theme) => {
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.style.colorScheme = theme;
+      try {
+        localStorage.setItem("starlight-theme", theme);
+      } catch {
+        // A blocked localStorage should not break the toggle for this page view.
+      }
+      // Keep Starlight's own machinery in sync in case anything else reads from it.
+      window.StarlightThemeProvider?.updatePickers?.(theme);
+    };
+
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest?.(".quiet-theme-toggle");
+      if (button === null || button === undefined) return;
+
+      const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      // Crossfade the new theme in over the old, rather than swapping instantly.
+      if (typeof document.startViewTransition !== "function" || reduceMotion) {
+        apply(next);
+        return;
+      }
+
+      const transition = document.startViewTransition(() => apply(next));
+      transition.ready
+        .then(() => {
+          document.documentElement.animate(
+            { opacity: [0, 1] },
+            {
+              duration: 420,
+              easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+              pseudoElement: "::view-transition-new(root)",
+            },
+          );
+        })
+        .catch(() => {
+          // A refused transition still leaves the theme applied; nothing to recover.
+        });
+    });
+  }
+</script>

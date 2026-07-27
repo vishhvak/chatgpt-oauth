@@ -7,6 +7,7 @@ import {
   DisabledError,
   ReauthRequiredError,
   TokenRefreshError,
+  requireSubject,
   type AuthSession,
   type CredentialStore,
   type Session,
@@ -133,8 +134,13 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
     return created.promise;
   }
 
-  async function getTokenSet(subject: string, forceRefresh = false): Promise<TokenSet> {
+  function assertEnabled(): void {
     if (options.disabled?.() === true) throw new DisabledError();
+  }
+
+  async function getTokenSet(subject: string, forceRefresh = false): Promise<TokenSet> {
+    requireSubject(subject);
+    assertEnabled();
     if (forceRefresh) return (await inFlight(subject, true)).token;
     // One load carries both the freshness check and, when already fresh, the whole token set.
     const token = await options.store.load(subject);
@@ -145,12 +151,22 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
   }
 
   return {
+    // beginLogin takes no subject and touches neither store nor network, so it is deliberately
+    // unguarded — matching the Kotlin and Swift ports.
     beginLogin: oauth.beginLogin,
     async completeLogin(subject, callbackUrl, pending) {
+      requireSubject(subject);
+      assertEnabled();
       return persistFresh(subject, await oauth.completeLogin(callbackUrl, pending));
     },
     async startDeviceLogin(subject) {
-      return oauth.startDeviceLogin((token) => persistFresh(subject, token));
+      requireSubject(subject);
+      assertEnabled();
+      return oauth.startDeviceLogin((token) => {
+        // Device polling runs for minutes; the kill switch can flip before the exchange lands.
+        assertEnabled();
+        return persistFresh(subject, token);
+      });
     },
     getTokenSet,
     async getAccessToken(subject) {
@@ -160,9 +176,16 @@ export function createAuthSession(options: AuthSessionOptions): AuthSession {
       return (await getTokenSet(subject, true)).accessToken;
     },
     async status(subject) {
+      requireSubject(subject);
+      assertEnabled();
       const token = await options.store.load(subject);
       return token === null ? null : sessionFor(subject, token);
     },
-    async logout(subject) { await options.store.delete(subject); },
+    // logout stays reachable while disabled: a kill switch that traps credentials in the store with
+    // no way to remove them is worse than one that lets them out. All four ports agree.
+    async logout(subject) {
+      requireSubject(subject);
+      await options.store.delete(subject);
+    },
   };
 }

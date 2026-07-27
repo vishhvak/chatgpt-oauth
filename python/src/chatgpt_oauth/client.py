@@ -77,7 +77,9 @@ class SubscriptionAI:
         self._owns_client = client is None
         separator = "&" if "?" in protocol.responses_url else "?"
         # The backend rejects requests without client_version (400 missing query param).
-        self._endpoint = f"{protocol.responses_url}{separator}client_version={protocol.client_version}"
+        self._endpoint = (
+            f"{protocol.responses_url}{separator}client_version={protocol.client_version}"
+        )
         self._session_id = session_id or str(uuid.uuid4())
         self._on_rate_limits = on_rate_limits
         self._last_rate_limits: RateLimitSnapshot | None = None

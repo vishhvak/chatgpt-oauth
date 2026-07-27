@@ -13,6 +13,16 @@ function requiredEnv(name: "DATABASE_URL" | "CHATGPT_OAUTH_KEY" | "SESSION_SECRE
   return value;
 }
 
+/** Fails loudly on a malformed PUBLIC_URL instead of surfacing a bare ERR_INVALID_URL. */
+function requiredUrl(name: "PUBLIC_URL", fallback: string): URL {
+  const value = process.env[name] ?? fallback;
+  try {
+    return new URL(value);
+  } catch {
+    throw new Error(`${name} must be an absolute URL such as https://example.com.`);
+  }
+}
+
 function json(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(body));
@@ -43,7 +53,7 @@ function requestShape(body: Record<string, unknown>): ResponseRequest {
   };
 }
 
-const publicUrl = new URL(process.env.PUBLIC_URL ?? `http://localhost:${process.env.PORT ?? "3000"}`);
+const publicUrl = requiredUrl("PUBLIC_URL", `http://localhost:${process.env.PORT ?? "3000"}`);
 const sessionSecret = requiredEnv("SESSION_SECRET");
 if (Buffer.byteLength(sessionSecret) < 32) throw new Error("SESSION_SECRET must contain at least 32 bytes.");
 const store = await createPostgresCredentialStore({

@@ -1,0 +1,10 @@
+{
+  "language": "mixed",
+  "kind": "library",
+  "packageManager": "pnpm",
+  "artifacts": {
+    "policy": "private",
+    "dir": ".agents/work"
+  },
+  "bindingDocs": []
+}

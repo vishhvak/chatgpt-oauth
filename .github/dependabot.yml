@@ -1,0 +1,47 @@
+# Nothing here surfaces dependency age automatically today, which is why the Android port's only
+# at-rest credential primitive (androidx.security:security-crypto) sat on a terminally deprecated
+# release unnoticed. Weekly, grouped, so the noise stays manageable.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: "/typescript"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: "/video"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: pip
+    directory: "/python"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # Dependabot's Gradle support does not read version catalogs (gradle/libs.versions.toml) as
+  # thoroughly as Renovate does. If Kotlin bumps stop appearing here, switch this ecosystem to
+  # Renovate rather than assuming the dependencies are current.
+  - package-ecosystem: gradle
+    directory: "/kotlin"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]

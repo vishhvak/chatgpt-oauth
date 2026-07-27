@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   AuthError,
+  DisabledError,
   RateLimitError,
   ReauthRequiredError,
   StateMismatchError,
@@ -399,5 +400,134 @@ describe("v1 invariants", () => {
     await client.respond({ model: "gpt-test", input: "three" });
     expect(client.lastRateLimits).toEqual({});
     expect(observed).toHaveBeenCalledTimes(3);
+  });
+
+  it("14. rejects an empty or blank subject before any credential lookup", async () => {
+    const store = {
+      load: vi.fn(async () => null),
+      compareAndSwap: vi.fn(async () => ({ ok: true, current: null })),
+      delete: vi.fn(async () => undefined),
+    } satisfies CredentialStore;
+    const session = createAuthSession({ store });
+
+    for (const empty of ["", "   "]) {
+      await expect(session.getAccessToken(empty)).rejects.toBeInstanceOf(StoreError);
+      await expect(session.status(empty)).rejects.toBeInstanceOf(StoreError);
+      await expect(session.logout(empty)).rejects.toBeInstanceOf(StoreError);
+    }
+    // The point is not merely that it throws: no credential row may be read or written for "".
+    expect(store.load).not.toHaveBeenCalled();
+    expect(store.compareAndSwap).not.toHaveBeenCalled();
+    expect(store.delete).not.toHaveBeenCalled();
+
+    // The store layer guards independently of the session layer.
+    await expect(createMemoryStore().load("")).rejects.toBeInstanceOf(StoreError);
+    await expect(createMemoryStore().delete("")).rejects.toBeInstanceOf(StoreError);
+  });
+
+  it("15. blocks every credential entry point while disabled but still allows logout", async () => {
+    const store = {
+      load: vi.fn(async () => token()),
+      compareAndSwap: vi.fn(async () => ({ ok: true, current: token() })),
+      delete: vi.fn(async () => undefined),
+    } satisfies CredentialStore;
+    const request = vi.fn(async () => tokenResponse());
+    const session = createAuthSession({
+      store,
+      disabled: () => true,
+      fetch: request as unknown as typeof fetch,
+    });
+
+    await expect(session.getAccessToken(subject)).rejects.toBeInstanceOf(DisabledError);
+    await expect(session.getTokenSet(subject)).rejects.toBeInstanceOf(DisabledError);
+    await expect(session.refreshAccessToken(subject)).rejects.toBeInstanceOf(DisabledError);
+    await expect(session.status(subject)).rejects.toBeInstanceOf(DisabledError);
+    await expect(session.startDeviceLogin(subject)).rejects.toBeInstanceOf(DisabledError);
+    await expect(
+      session.completeLogin(subject, "http://localhost/cb?state=s&code=c", { url: "u", state: "s", verifier: "v", redirectUri: "r" }),
+    ).rejects.toBeInstanceOf(DisabledError);
+
+    // The kill switch must stop the store and the network, not just raise afterwards.
+    expect(store.load).not.toHaveBeenCalled();
+    expect(store.compareAndSwap).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+
+    // Logout stays reachable: trapping credentials with no way to delete them is worse.
+    await expect(session.logout(subject)).resolves.toBeUndefined();
+    expect(store.delete).toHaveBeenCalledWith(subject);
+
+    // The guard must be conditional, not always-on.
+    const enabled = createAuthSession({ store, disabled: () => false, fetch: request as unknown as typeof fetch });
+    await expect(enabled.status(subject)).resolves.not.toBeNull();
+  });
+
+  it("16. adopts a healthy concurrent rotation instead of quarantining it", async () => {
+    const healthy = token({ version: 2, accessToken: "healthy-access", expiresAt: 10_000_000 });
+    const store: CredentialStore = {
+      async load() { return token({ expiresAt: 1 }); },
+      // The quarantine marker always loses to a newer healthy generation.
+      async compareAndSwap() { return { ok: false, current: structuredClone(healthy) }; },
+      async delete() {},
+    };
+    const session = createAuthSession({
+      store,
+      now: () => 10_000,
+      fetch: vi.fn(async () => Response.json({ error: "invalid_grant" }, { status: 400 })) as unknown as typeof fetch,
+    });
+
+    // PROTOCOL §6: a terminal refresh failure must NOT quarantine a healthy CAS winner.
+    await expect(session.getAccessToken(subject)).resolves.toBe("healthy-access");
+    expect(healthy.quarantinedAt).toBeUndefined();
+  });
+
+  it("17. yields a trailing SSE block that arrives without a final blank line", async () => {
+    const response = streamResponse([
+      "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\n",
+      "event: truncated\ndata: last",
+    ]);
+    if (response.body === null) throw new Error("missing fixture body");
+    const events = [];
+    for await (const event of parseSSE(response.body)) events.push(event);
+    expect(events).toEqual([
+      { type: "response.output_text.delta", data: { type: "response.output_text.delta", delta: "Hi" }, delta: "Hi" },
+      { type: "truncated", data: "last" },
+    ]);
+  });
+
+  it("18. frames one large event split across many small chunks", async () => {
+    // Guards the linear-scan invariant: the parser must not depend on chunk boundaries.
+    const payload = "x".repeat(20_000);
+    const whole = `data: {"type":"big","delta":"${payload}"}\n\n`;
+    const parts = [];
+    for (let index = 0; index < whole.length; index += 64) parts.push(whole.slice(index, index + 64));
+    const response = streamResponse(parts);
+    if (response.body === null) throw new Error("missing fixture body");
+    const events = [];
+    for await (const event of parseSSE(response.body)) events.push(event);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.delta).toBe(payload);
+  });
+
+  it("19. honors an injected clock for an HTTP-date Retry-After", async () => {
+    const sleeps: number[] = [];
+    const fakeNow = Date.parse("2030-01-01T00:00:00Z");
+    let call = 0;
+    const request = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return new Response("{}", { status: 429, headers: { "retry-after": "Tue, 01 Jan 2030 00:00:30 GMT" } });
+      }
+      return tokenResponse();
+    });
+    const session = createAuthSession({
+      store: createMemoryStore({ [subject]: token({ expiresAt: 1 }) }),
+      fetch: request as unknown as typeof fetch,
+      now: () => fakeNow,
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+
+    await expect(session.getAccessToken(subject)).resolves.toBe("access-new");
+    // 30s per the fake clock, not per the real one.
+    expect(sleeps).toEqual([30_000]);
   });
 });

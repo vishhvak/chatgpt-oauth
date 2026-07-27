@@ -48,14 +48,18 @@ export interface OAuthRuntime {
   protocol?: ProtocolOverrides;
 }
 
-/** RFC 7231 Retry-After: numeric seconds or an HTTP-date, normalized to milliseconds from now. */
-export function retryAfter(response: Response): number | undefined {
+/**
+ * RFC 7231 Retry-After: numeric seconds or an HTTP-date, normalized to milliseconds from now.
+ * `now` is injectable so the HTTP-date branch honors a caller-supplied clock like every other time
+ * computation in this module; it defaults to the real clock for callers that have no injected one.
+ */
+export function retryAfter(response: Response, now: () => number = Date.now): number | undefined {
   const value = response.headers.get("retry-after");
   if (value === null) return undefined;
   const seconds = Number(value);
   if (Number.isFinite(seconds)) return Math.max(0, seconds * 1_000);
   const date = Date.parse(value);
-  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+  return Number.isNaN(date) ? undefined : Math.max(0, date - now());
 }
 
 async function failure(response: Response, context: string): Promise<never> {
@@ -189,7 +193,7 @@ export function createOAuth(runtime: OAuthRuntime = {}) {
         continue;
       }
       if (response.status === 429 && attempt < 2) {
-        await sleep(retryAfter(response) ?? 250 * 2 ** attempt);
+        await sleep(retryAfter(response, now) ?? 250 * 2 ** attempt);
         continue;
       }
       if (!response.ok) await failure(response, "refresh");

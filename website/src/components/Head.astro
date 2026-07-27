@@ -1,0 +1,10 @@
+---
+// Adds Astro's client-side router so sidebar navigation swaps content in place instead of doing a
+// full document reload. It also means data-theme survives navigation, so there is nothing left to
+// flash.
+import Default from "@astrojs/starlight/components/Head.astro";
+import { ClientRouter } from "astro:transitions";
+---
+
+<Default><slot /></Default>
+<ClientRouter />

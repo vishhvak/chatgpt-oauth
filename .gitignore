@@ -4,12 +4,18 @@ coverage/
 *.log
 .DS_Store
 
-# local planning / prep artifacts — never push
+# Real secrets, never the template that documents them. Keep the negation last: a later
+# broad `.env*` line (Vercel CLI appends one) would silently re-ignore the template.
+.env
+.env.*
+!.env.example
+
+# Working docs — specs, handoffs, research notes. Directory-anchored on purpose: these were once
+# bare filename patterns, which silently protected any SPEC.md anywhere and would have stopped
+# protecting these the moment one was renamed or moved.
+.agents/work/
 .lavish/
 .claude/
-SPEC.md
-REFERENCES.md
-HANDOFF.md
 consensus.html
 .venv/
 .build/
@@ -21,3 +27,4 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.vercel

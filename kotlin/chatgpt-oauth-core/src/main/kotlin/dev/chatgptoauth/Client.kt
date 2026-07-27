@@ -100,7 +100,9 @@ public class SubscriptionAI(
         }
         if (!response.isSuccessful) {
             val status = response.code
-            val snippet = response.readRedactedSnippet()
+            // 1024 characters, matching the TypeScript, Python and Swift ports. Without the explicit
+            // bound this defaults to outputLimit = readLimit = 4096 and emits 4x more text than they do.
+            val snippet = response.readRedactedSnippet(outputLimit = 1_024)
             throw TransportError("Subscription transport failed ($status): $snippet")
         }
         return response

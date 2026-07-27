@@ -30,11 +30,21 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncIterable
   try {
     while (true) {
       const { done, value } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done });
-      // Preserve a trailing CR until the next chunk so split CRLF is one newline, not two.
-      buffer = buffer.replaceAll("\r\n", "\n").replace(/\r(?!$)/gu, "\n");
-      if (done) buffer = buffer.replaceAll("\r", "\n");
-      let boundary = buffer.indexOf("\n\n");
+      // `buffer` is already normalized, so only the newly decoded suffix needs normalizing, and a
+      // new "\n\n" can only appear at the join between the two. Re-normalizing and re-scanning the
+      // whole accumulated buffer per chunk is O(n^2) for one large event split across many small
+      // chunks — the same fix the Python, Kotlin and Swift ports already carry.
+      // A CR held back from the previous chunk rejoins this one so a split CRLF collapses to one
+      // newline; the boundary search then starts one character early to span the join.
+      const pendingCr = buffer.endsWith("\r");
+      if (pendingCr) buffer = buffer.slice(0, -1);
+      const searchFrom = Math.max(0, buffer.length - 1);
+      const decoded = decoder.decode(value, { stream: !done });
+      const raw = pendingCr ? `\r${decoded}` : decoded;
+      buffer += done
+        ? raw.replaceAll("\r\n", "\n").replaceAll("\r", "\n")
+        : raw.replaceAll("\r\n", "\n").replace(/\r(?!$)/gu, "\n");
+      let boundary = buffer.indexOf("\n\n", searchFrom);
       while (boundary !== -1) {
         const event = parseBlock(buffer.slice(0, boundary));
         buffer = buffer.slice(boundary + 2);

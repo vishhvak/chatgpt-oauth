@@ -51,6 +51,50 @@ final class AuthSessionTests: XCTestCase {
         XCTAssertEqual(requestCount, 1)
     }
 
+    func testSeparateSessionsOverOneStoreShareOneRefresh() async throws {
+        // Singleflight is scoped to (store, subject), not to one AuthSession. An app that builds a
+        // session per request over a shared store must still issue exactly one refresh, or a
+        // rotating refresh token gets spent twice.
+        let counter = RefreshURLProtocol.counter
+        await counter.reset()
+        let store = MemoryCredentialStore(initial: [subject: token()])
+        let sessions = (0..<8).map { _ in makeSession(store: store, now: { 10_000 }) }
+
+        let subject = subject
+        let values = try await withThrowingTaskGroup(of: String.self) { group in
+            for session in sessions {
+                group.addTask { try await session.getAccessToken(subject: subject) }
+            }
+            var values: [String] = []
+            for try await value in group { values.append(value) }
+            return values
+        }
+
+        XCTAssertEqual(values.count, 8)
+        XCTAssertEqual(Set(values), ["access-new"])
+        await counter.waitForValue(1)
+        let requestCount = await counter.value()
+        XCTAssertEqual(requestCount, 1, "eight sessions over one store must share a single refresh")
+    }
+
+    func testDistinctStoresDoNotShareARefreshFlight() async throws {
+        // The converse: identity keying must not collapse genuinely separate stores together.
+        let counter = RefreshURLProtocol.counter
+        await counter.reset()
+        let subject = subject
+        let sessions = (0..<3).map { _ in
+            makeSession(store: MemoryCredentialStore(initial: [subject: token()]), now: { 10_000 })
+        }
+
+        for session in sessions {
+            _ = try await session.getAccessToken(subject: subject)
+        }
+
+        await counter.waitForValue(3)
+        let requestCount = await counter.value()
+        XCTAssertEqual(requestCount, 3, "three independent stores must each refresh")
+    }
+
     func testForcedJoinDoesNotSettleOnSkippedNonForcedFlight() async throws {
         let store = ControlledStore(initial: token(expiresAt: 10_500))
         let counter = RefreshURLProtocol.counter

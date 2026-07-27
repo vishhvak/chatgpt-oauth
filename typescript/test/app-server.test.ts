@@ -237,4 +237,43 @@ describe("app-server invariants", () => {
       expect(messages.find((message) => message.method === "account/rateLimits/read")).not.toHaveProperty("params");
     } finally { await closeAndRemove(client, work.directory); }
   });
+
+  it("21. starts a fresh thread after a transient thread/start failure", async () => {
+    const work = await workspace();
+    let client: AppServerClient | undefined;
+    try {
+      client = await createAppServerClient(authSession(), subject, {
+        codexBin: fakeCodex,
+        codexHome: work.codexHome,
+        env: { FAKE_CODEX_SCENARIO: "thread-start-flaky", FAKE_WIRE_FILE: work.wireFile },
+      });
+      // One transient failure must not brick the client for the rest of its lifetime.
+      await expect(client.respond({ model: "gpt-test", input: "hello" })).rejects.toBeInstanceOf(AppServerRpcError);
+      const result = await client.respond({ model: "gpt-test", input: "hello again" });
+      expect(result.outputText).toBe("hello");
+
+      const messages = (await readFile(work.wireFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(messages.filter((message) => message.method === "thread/start")).toHaveLength(2);
+    } finally { await closeAndRemove(client, work.directory); }
+  });
+
+  it("22. redacts a credential from stderr before the rolling window drops its label", async () => {
+    const work = await workspace();
+    try {
+      // The child writes a credential-shaped blob to stderr and exits, so the failure surfaces from
+      // client creation rather than from a turn.
+      const failure = await createAppServerClient(authSession(), subject, {
+        codexBin: fakeCodex,
+        codexHome: work.codexHome,
+        env: { FAKE_CODEX_SCENARIO: "stderr-secret" },
+      }).then(() => null, (error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(AppServerError);
+      const message = (failure as Error).message;
+      // The value outlives the `"access_token":` label in a tail-truncated window, so redaction has
+      // to run before the trim, not after it.
+      expect(message).not.toContain("TAILSECRET");
+      expect(message).toContain("[REDACTED]");
+    } finally { await rm(work.directory, { recursive: true, force: true }); }
+  });
 });

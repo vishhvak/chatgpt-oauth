@@ -78,6 +78,34 @@ describe("React web auth", () => {
     expect(result.current.session).toBeNull();
   });
 
+  it("notifies onConnected and onError from the transition, not from an effect", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(reply(200, { status: "connected", email: "v@example.com" }))
+      .mockResolvedValueOnce(reply(500)));
+    const onConnected = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChatGPTAuth({ endpoints, onConnected, onError }));
+
+    await waitFor(() => { expect(result.current.status).toBe("connected"); });
+    expect(onConnected).toHaveBeenCalledExactlyOnceWith({ status: "connected", email: "v@example.com" });
+    expect(onError).not.toHaveBeenCalled();
+
+    await act(async () => { await result.current.refresh(); });
+    expect(result.current.status).toBe("error");
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+    expect(onConnected).toHaveBeenCalledOnce();
+  });
+
+  it("forwards the component's onConnected prop through to the hook", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply(200, { status: "connected", email: "v@example.com", planType: "pro" })));
+    const onConnected = vi.fn();
+    render(<SignInWithChatGPT endpoints={endpoints} onConnected={onConnected} />);
+
+    expect(await screen.findByText("v@example.com")).toBeTruthy();
+    expect(onConnected).toHaveBeenCalledExactlyOnceWith({ status: "connected", email: "v@example.com", planType: "pro" });
+  });
+
   it("renders signed-out, connected, disclaimer, and render-override states", async () => {
     const request = vi.fn()
       .mockResolvedValueOnce(reply(200, { status: "disconnected" }))
@@ -117,7 +145,7 @@ describe("React web auth", () => {
     const directory = join(process.cwd(), "src/react");
     const source = `${await readFile(join(directory, "index.tsx"), "utf8")}\n${await readFile(join(directory, "styles.ts"), "utf8")}`;
     expect(source).not.toMatch(/from ["'](?:tailwind|bootstrap|lucide|react-icons|@fortawesome)/u);
-    expect(source).toContain("M22.2819 9.8211");
+    expect(source).toContain("M22.28 9.82");
     expect(source).not.toContain("<circle");
     expect(source).toContain("fill: currentColor");
   });

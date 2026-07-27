@@ -35,6 +35,7 @@ const CODE_A =
 const CODE_B =
   'const chatgpt = createChatGPT(auth, subject);\n\nstreamText({\n  model: chatgpt("gpt-5.4-mini"),\n});';
 const LANGS_TEXT = "One protocol.\nFour implementations.";
+const LANGS = ["TypeScript", "Swift", "Python", "Kotlin"];
 const URL_TEXT = "github.com/vishhvak/chatgpt-oauth";
 
 // code block A/B timing inside the Code scene
@@ -253,7 +254,6 @@ const CodeScene: React.FC = () => {
 
 const LangsScene: React.FC = () => {
   const frame = useCurrentFrame();
-  const langs = ["TypeScript", "Swift", "Python", "Kotlin"];
   return (
     <AbsoluteFill
       style={{ justifyContent: "center", alignItems: "center", flexDirection: "column", gap: 84 }}
@@ -267,7 +267,7 @@ const LangsScene: React.FC = () => {
         caret={false}
       />
       <div style={{ display: "flex", gap: 58 }}>
-        {langs.map((lang, i) => (
+        {LANGS.map((lang, i) => (
           <div
             key={lang}
             style={{

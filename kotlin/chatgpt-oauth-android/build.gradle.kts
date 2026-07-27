@@ -17,14 +17,23 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // chatgpt-oauth-core uses java.util.Base64 (Pkce.kt) and java.util.UUID.randomUUID
+        // (Client.kt). java.util.Base64 only exists from API 26, so without desugaring every
+        // beginLogin() on an API 23-25 device dies with NoSuchMethodError — and minSdk here is 23.
+        isCoreLibraryDesugaringEnabled = true
     }
     buildFeatures { compose = true }
+    testOptions { unitTests.all { it.useJUnitPlatform() } }
 }
 
 kotlin { jvmToolchain(17) }
 
 dependencies {
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
     api(project(":chatgpt-oauth-core"))
+    // Transitional: read-only, used solely by LegacyEncryptedPreferences to migrate records written
+    // before the Keystore envelope. Google deprecated this library in April 2025 at 1.1.0-alpha07.
+    // Drop it once no install can still hold a legacy record.
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.activity.compose)
@@ -32,6 +41,11 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.compose.ui.tooling.preview)
+
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.junit.jupiter)
+    testImplementation(kotlin("test"))
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 mavenPublishing {

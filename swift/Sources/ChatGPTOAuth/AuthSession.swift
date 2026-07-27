@@ -2,23 +2,18 @@ import Foundation
 
 /// Coordinates subject-scoped OAuth lifecycle operations, refresh singleflight, CAS persistence, and quarantine.
 public actor AuthSession {
-    private struct RefreshResult: Sendable {
-        let token: TokenSet
-        let refreshed: Bool
-    }
-
-    private struct RefreshFlight: Sendable {
-        let id: UUID
-        let force: Bool
-        let task: Task<RefreshResult, Error>
-    }
+    /// Stands in for a value-type store, which has no shared identity to coordinate on.
+    private final class FlightAnchor {}
 
     private let store: any CredentialStore
     private let oauth: OAuth
     private let now: @Sendable () -> Int64
     private let disabled: @Sendable () -> Bool
     private let refreshMarginMilliseconds: Int64
-    private var flights: [String: RefreshFlight] = [:]
+    /// Held strongly so the registry's weak entry outlives this session; the session already
+    /// retains `store`, so this changes no lifetimes.
+    private let flightAnchor: AnyObject
+    private let flightKey: ObjectIdentifier
 
     /// Creates an auth session whose credential operations always require an explicit subject.
     public init(
@@ -43,6 +38,12 @@ public actor AuthSession {
         self.now = now
         self.disabled = disabled
         self.refreshMarginMilliseconds = protocolConfiguration.refreshMarginMilliseconds
+        // Reference-type stores (both shipped stores are actors) share a registry entry by identity,
+        // so every session over one store joins the same flight. `type(of:)` rather than
+        // `as? AnyObject` because the latter silently boxes a value type into a fresh object.
+        let anchor: AnyObject = type(of: store) is AnyClass ? (store as AnyObject) : FlightAnchor()
+        self.flightAnchor = anchor
+        self.flightKey = ObjectIdentifier(anchor)
     }
 
     /// Begins a redirect login without reading or writing any ambient credential.
@@ -213,32 +214,34 @@ public actor AuthSession {
     }
 
     private func inFlight(subject: String, force: Bool) async throws -> RefreshResult {
-        if let existing = flights[subject] {
-            if !force || existing.force { return try await existing.task.value }
+        let key = flightKey
+        let (flight, existed) = await RefreshFlightRegistry.shared.flight(
+            key: key,
+            subject: subject,
+            force: force,
+            make: { [weak self] id in
+                Task {
+                    guard let self else {
+                        throw ChatGPTOAuthError.authentication(
+                            message: "The auth session ended during refresh."
+                        )
+                    }
+                    do {
+                        let result = try await self.refreshOne(subject: subject, force: force)
+                        await RefreshFlightRegistry.shared.clear(key: key, subject: subject, id: id)
+                        return result
+                    } catch {
+                        await RefreshFlightRegistry.shared.clear(key: key, subject: subject, id: id)
+                        throw error
+                    }
+                }
+            }
+        )
+        if existed, force, !flight.force {
             // A forced retry may share a real refresh but cannot settle on a flight that skipped the network.
-            let joined = try await existing.task.value
+            let joined = try await flight.task.value
             return joined.refreshed ? joined : try await inFlight(subject: subject, force: true)
         }
-
-        let id = UUID()
-        let task = Task { [weak self] in
-            guard let self else {
-                throw ChatGPTOAuthError.authentication(message: "The auth session ended during refresh.")
-            }
-            do {
-                let result = try await self.refreshOne(subject: subject, force: force)
-                await self.clearFlight(subject: subject, id: id)
-                return result
-            } catch {
-                await self.clearFlight(subject: subject, id: id)
-                throw error
-            }
-        }
-        flights[subject] = RefreshFlight(id: id, force: force, task: task)
-        return try await task.value
-    }
-
-    private func clearFlight(subject: String, id: UUID) {
-        if flights[subject]?.id == id { flights.removeValue(forKey: subject) }
+        return try await flight.task.value
     }
 }

@@ -1,0 +1,12 @@
+# Supply-chain hardening. This package handles users' ChatGPT refresh tokens, so a
+# malicious transitive dependency is a credential-disclosure bug, not just a build
+# annoyance. These two settings close the window that npm-registry attacks rely on.
+
+# Ignore versions published within the last 3 days. Compromised releases are
+# typically detected and unpublished within hours, so a resolution delay keeps
+# them out of the lockfile entirely.
+minimumReleaseAge: 4320
+
+# Reject an update whose trust signals (provenance attestation, signatures) are
+# weaker than those of the version it replaces.
+trustPolicy: no-downgrade

@@ -35,8 +35,8 @@ export const KeyClicks: React.FC<{
   }
   return (
     <>
-      {clicks.map((c, i) => (
-        <Sequence key={i} name={`key ${i}`} from={c.frame} durationInFrames={5}>
+      {clicks.map((c) => (
+        <Sequence key={c.frame} name={`key ${c.frame}`} from={c.frame} durationInFrames={5}>
           <Audio src={staticFile(c.sample)} volume={c.gain} />
         </Sequence>
       ))}

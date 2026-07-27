@@ -136,4 +136,23 @@ describe("ai-sdk bridge", () => {
     await generateText({ model: chatgpt("gpt-5.4-mini"), prompt: "hello" });
     expect(calls).toBe(2);
   });
+
+  it("surfaces a network failure as a typed, redacted TransportError", async () => {
+    const chatgpt = createChatGPT(createAuthSession({ store: await seeded() }), "alice", {
+      fetch: async () => {
+        throw new Error("connect ECONNREFUSED while sending authorization: Bearer access-token-value");
+      },
+    });
+
+    // PROTOCOL §12: every public failure carries a stable code, so `instanceof` works for consumers.
+    const failure = await generateText({ model: chatgpt("gpt-5.4-mini"), prompt: "hello" })
+      .then(() => null, (error: unknown) => error);
+    const text = JSON.stringify(failure, Object.getOwnPropertyNames(failure));
+
+    expect(text).toContain("transport");
+    expect(text).toContain("Subscription request failed");
+    // §10: the bearer value must not survive into the thrown message.
+    expect(text).not.toContain("access-token-value");
+    expect(text).toContain("[REDACTED]");
+  });
 });

@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "chatgpt-oauth-kotlin"
 include(":chatgpt-oauth-core", ":chatgpt-oauth-android")
+// Runnable example; never published.
+include(":examples:verify")

@@ -91,18 +91,27 @@ export function createChatGPT(
     if (!target.searchParams.has("client_version")) target.searchParams.set("client_version", clientVersion);
     input = target.toString();
 
-    const response = await withAuthRetry(auth, subject, (tokenSet) => request(input, {
-      ...init,
-      ...(rewritten === undefined ? {} : { body: rewritten.body }),
-      headers: {
-        ...Object.fromEntries(new Headers(init?.headers)),
-        authorization: `Bearer ${tokenSet.accessToken}`,
-        ...(tokenSet.accountId === undefined ? {} : { "chatgpt-account-id": tokenSet.accountId }),
-        "openai-beta": "responses=experimental",
-        originator: "codex_cli_rs",
-        session_id: sessionId,
-      },
-    }));
+    const response = await withAuthRetry(auth, subject, async (tokenSet) => {
+      try {
+        return await request(input, {
+          ...init,
+          ...(rewritten === undefined ? {} : { body: rewritten.body }),
+          headers: {
+            ...Object.fromEntries(new Headers(init?.headers)),
+            authorization: `Bearer ${tokenSet.accessToken}`,
+            ...(tokenSet.accountId === undefined ? {} : { "chatgpt-account-id": tokenSet.accountId }),
+            "openai-beta": "responses=experimental",
+            originator: "codex_cli_rs",
+            session_id: sessionId,
+          },
+        });
+      } catch (error) {
+        // Match core/client.ts: a DNS/TLS/reset failure must surface as a typed, redacted
+        // TransportError, not a raw TypeError that escapes `instanceof ChatGPTOAuthError`.
+        const message = redact(error instanceof Error ? error.message : String(error)).slice(0, 1_024);
+        throw new TransportError(`Subscription request failed: ${message}`);
+      }
+    });
     captureRateLimits(response);
     if (!response.ok || rewritten === undefined || rewritten.streaming) return response;
     return collapse(response);

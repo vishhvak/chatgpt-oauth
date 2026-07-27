@@ -6,6 +6,7 @@ export { createAuthSession } from "./core/lifecycle.js";
 export type { AuthSessionOptions } from "./core/lifecycle.js";
 export { createClient } from "./core/client.js";
 export type { ClientOptions } from "./core/client.js";
+export { requireSubject } from "./core/types.js";
 export { extractUnverifiedClaims } from "./core/jwt.js";
 export type { UnverifiedClaims } from "./core/jwt.js";
 export {

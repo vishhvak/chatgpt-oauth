@@ -268,8 +268,9 @@ export async function createAppServerClient(
       return Promise.reject(new AppServerError("A single app-server client cannot change instructions after its thread starts."));
     }
     if (threadId !== undefined) return Promise.resolve(threadId);
+    if (threadPromise !== undefined) return threadPromise;
     threadInstructions = req.instructions;
-    threadPromise ??= rpc.request<ThreadStartResult>("thread/start", {
+    const started = rpc.request<ThreadStartResult>("thread/start", {
       model: req.model,
       ...(req.instructions === undefined ? {} : { baseInstructions: req.instructions }),
       ephemeral: true,
@@ -277,7 +278,17 @@ export async function createAppServerClient(
       if (typeof result.thread?.id !== "string") throw new AppServerError("Codex thread/start omitted thread.id.");
       threadId = result.thread.id;
       return threadId;
+    }).catch((error: unknown) => {
+      // A transient thread/start failure must not brick the client for its whole lifetime. Clear
+      // both fields together: leaving threadInstructions set would make the next call with different
+      // instructions fail the "cannot change instructions" guard for a thread that never started.
+      if (threadPromise === started) {
+        threadPromise = undefined;
+        threadInstructions = undefined;
+      }
+      throw error;
     });
+    threadPromise = started;
     return threadPromise;
   }
 

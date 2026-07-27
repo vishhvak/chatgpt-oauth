@@ -79,7 +79,10 @@ export function createRpcConnection(child: ChildProcessWithoutNullStreams, optio
     try { handle(JSON.parse(line) as RpcMessage); }
     catch (error) { close(new AppServerError(`Codex app-server sent invalid JSON: ${safeMessage(error)}; ${redact(line).slice(0, 256)}`)); }
   });
-  child.stderr.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString("utf8")}`.slice(-4_096); });
+  // Redact before the rolling trim, never after: the patterns anchor on the key name, and this
+  // window drops from the front, so a late redact could keep a value whose `"access_token":` label
+  // was already discarded. redact() is idempotent, so re-running it per chunk is safe.
+  child.stderr.on("data", (chunk: Buffer) => { stderr = redact(`${stderr}${chunk.toString("utf8")}`).slice(-4_096); });
   child.once("error", (error) => { close(new AppServerError(`Codex app-server process error: ${safeMessage(error)}`)); });
   child.once("exit", (code, signal) => {
     if (!closed) close(new AppServerError(`Codex app-server exited (${signal ?? code ?? "unknown"}): ${redact(stderr).slice(0, 1_024)}`));

@@ -42,11 +42,18 @@ jobs:
     defaults:
       run:
         working-directory: python
+    strategy:
+      fail-fast: false
+      matrix:
+        # pyproject declares requires-python = ">=3.10"; test the floor, not just the newest.
+        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: python/pyproject.toml
       - run: pip install -e '.[dev]'
       - run: pytest -q
       - run: mypy --strict src/chatgpt_oauth
@@ -63,5 +70,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      # chatgpt-oauth-android publishes to Maven Central, so it needs an SDK to compile against.
+      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew :chatgpt-oauth-core:build :chatgpt-oauth-core:test
+      - run: ./gradlew :chatgpt-oauth-android:assembleRelease :chatgpt-oauth-android:testDebugUnitTest

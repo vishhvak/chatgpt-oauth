@@ -162,3 +162,13 @@ export class DisabledError extends ChatGPTOAuthError {
 export class StoreError extends ChatGPTOAuthError {
   constructor(message: string, options?: ErrorOptions) { super(message, "store", options); }
 }
+
+/**
+ * Requires that `subject` is a nonempty server-derived identifier, shared by every credential entry
+ * point. An empty subject would key one shared credential row for every user — the global row the
+ * identity rule forbids. `StoreError` rather than `AuthError` because an empty subject is a
+ * storage-key precondition, not a rejected authentication attempt.
+ */
+export function requireSubject(subject: string): void {
+  if (subject.trim() === "") throw new StoreError("Credential subject must not be empty.");
+}

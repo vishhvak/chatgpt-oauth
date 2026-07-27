@@ -43,7 +43,15 @@ export const Typewriter: React.FC<{
   const done = shown >= total;
   const blinkOn = done ? Math.floor(frame / 16) % 2 === 0 : true;
 
-  let used = 0;
+  // Precompute each chunk's start offset so the render body stays side-effect
+  // free and every span gets a stable key that does not shift with the index.
+  let consumed = 0;
+  const segments = chunks.map((chunk) => {
+    const start = consumed;
+    consumed += chunk.text.length;
+    return { chunk, start };
+  });
+
   return (
     <div
       style={{
@@ -57,15 +65,11 @@ export const Typewriter: React.FC<{
         whiteSpace: "pre-wrap",
       }}
     >
-      {chunks.map((chunk, i) => {
-        const visible = Math.max(0, Math.min(chunk.text.length, shown - used));
-        used += chunk.text.length;
-        return (
-          <span key={i} style={{ color: chunk.color ?? INK }}>
-            {chunk.text.slice(0, visible)}
-          </span>
-        );
-      })}
+      {segments.map(({ chunk, start }) => (
+        <span key={`chunk-${start}`} style={{ color: chunk.color ?? INK }}>
+          {chunk.text.slice(0, Math.max(0, Math.min(chunk.text.length, shown - start)))}
+        </span>
+      ))}
       {caret && frame >= from && (
         <span
           style={{

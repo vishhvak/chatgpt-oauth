@@ -1,4 +1,5 @@
 import asyncio
+import socket
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -88,3 +89,41 @@ async def test_login_with_loopback_default_open_prints_url(
 
     assert token.access_token == "new"
     assert len(printed) == 1 and printed[0].startswith("Open https://")
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_login_with_loopback_binds_before_opening_the_browser() -> None:
+    """The listener must already accept connections when `open` runs.
+
+    `_send_callback` retries for five seconds, which hides this ordering entirely. Here the probe
+    connects exactly once, synchronously, at the moment `open` is invoked: if the bind still has
+    not happened the kernel answers ECONNREFUSED and this test fails, which is the browser's
+    experience when a pre-authenticated session redirects instantly.
+    """
+    respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200, json={"access_token": "new", "refresh_token": "refresh", "expires_in": 3600}
+        )
+    )
+    port = LOOPBACK_PORT + 2
+    live: list[socket.socket] = []
+
+    def open_url(url: str) -> None:
+        # One shot, no retry loop, no await: this is the assertion.
+        probe = socket.create_connection(("127.0.0.1", port), timeout=2)
+        live.append(probe)
+        request = f"GET /auth/callback?{_callback_query(url)} HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        probe.sendall(request.encode())
+        # Left open so the server's reply lands on a live peer; closed in the finally below.
+
+    try:
+        async with httpx.AsyncClient() as client:
+            auth = AuthSession(store=create_memory_store(), client=client, now=lambda: 0)
+            token = await login_with_loopback(auth, SUBJECT, open=open_url, port=port)
+    finally:
+        for probe in live:
+            probe.close()
+
+    assert token.access_token == "new"
+    assert len(live) == 1

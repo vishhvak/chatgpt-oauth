@@ -1,0 +1,344 @@
+/* The quiet register: text is the interface. Small type, narrow measure, neutral field, one accent,
+   hairline dividers, borders instead of shadows. Everything below is a Starlight variable override —
+   no layout is reimplemented. */
+@import "@fontsource-variable/geist-mono";
+
+/* Satoshi (Indian Type Foundry, ITF Free Font License) self-hosted from Fontshare. Geist Mono is
+   the pair: both are rationalist and even-width, so code blocks sit quietly next to the prose
+   instead of shouting a different voice at it. */
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/satoshi-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/satoshi-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/satoshi-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/satoshi-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --sl-font: "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  /* Narrow measure. Body copy sits at 672px; the sidebar stays slim so the page reads as one column. */
+  /* Pane width includes padding, so this lands the text measure near 672px — the top of
+     the register's range — and closes the dead gutter on wide screens. */
+  --sl-content-width: 48rem;
+  --sl-sidebar-width: 16rem;
+  --sl-nav-height: 3.5rem;
+
+  /* Small type, quiet hierarchy: no size jumps. h1 is 24px and normal weight. */
+  --sl-text-body: 1rem;
+  --sl-text-body-sm: 0.875rem;
+  --sl-text-code: 0.8125rem;
+  --sl-text-code-sm: 0.75rem;
+  --sl-text-h1: 1.5rem;
+  --sl-text-h2: 1.25rem;
+  --sl-text-h3: 1.0625rem;
+  --sl-text-h4: 1rem;
+  --sl-text-h5: 0.9375rem;
+  --sl-line-height: 1.6;
+  --sl-text-xs: 0.75rem;
+
+  color-scheme: light;
+}
+
+/* Light: true off-white, chroma 0. Not cream. */
+:root,
+:root[data-theme="light"] {
+  --sl-color-bg: #ffffff;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #ffffff;
+  --sl-color-bg-inline-code: rgb(0 0 0 / 0.05);
+  --sl-color-white: #171717;
+  --sl-color-text: #404040;
+  --sl-color-text-accent: #2563eb; /* blue-600 */
+  --sl-color-accent: #2563eb;
+  --sl-color-accent-high: #171717;
+  --sl-color-accent-low: rgb(37 99 235 / 0.1);
+  --sl-color-gray-1: #171717;
+  --sl-color-gray-2: #525252;
+  --sl-color-gray-3: #737373; /* muted */
+  --sl-color-gray-4: #a3a3a3;
+  --sl-color-gray-5: #e5e5e5;
+  --sl-color-gray-6: #f5f5f5;
+  --sl-color-gray-7: #fafafa;
+  --sl-color-hairline: rgb(0 0 0 / 0.1);
+  --sl-color-hairline-light: rgb(0 0 0 / 0.06);
+  --sl-color-hairline-shade: rgb(0 0 0 / 0.1);
+  --quiet-border: rgb(0 0 0 / 0.15);
+  --sl-color-text-invert: #ffffff;
+  --quiet-dot: #f59e0b; /* amber-500 */
+  color-scheme: light;
+}
+
+/* Dark is a first-class equal — neutral-800, deliberately not black. */
+:root[data-theme="dark"] {
+  --sl-color-bg: #262626;
+  --sl-color-bg-nav: #262626;
+  --sl-color-bg-sidebar: #262626;
+  --sl-color-bg-inline-code: rgb(255 255 255 / 0.08);
+  --sl-color-white: #f5f5f5;
+  --sl-color-text: #d4d4d4;
+  --sl-color-text-accent: #60a5fa; /* blue-400 */
+  --sl-color-accent: #60a5fa;
+  --sl-color-accent-high: #f5f5f5;
+  --sl-color-accent-low: rgb(96 165 250 / 0.15);
+  --sl-color-gray-1: #f5f5f5;
+  --sl-color-gray-2: #d4d4d4;
+  --sl-color-gray-3: #a3a3a3;
+  --sl-color-gray-4: #737373;
+  --sl-color-gray-5: #404040;
+  --sl-color-gray-6: #333333;
+  --sl-color-gray-7: #2e2e2e;
+  --sl-color-hairline: rgb(255 255 255 / 0.1);
+  --sl-color-hairline-light: rgb(255 255 255 / 0.06);
+  --sl-color-hairline-shade: rgb(255 255 255 / 0.1);
+  --quiet-border: rgb(255 255 255 / 0.15);
+  --sl-color-text-invert: #171717;
+  --quiet-dot: #d8b4fe; /* purple-300 */
+  color-scheme: dark;
+}
+
+/* ---- Type ---- */
+
+body {
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.005em;
+}
+
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4 {
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+
+.sl-markdown-content h1 {
+  font-weight: 400;
+}
+
+/* Hierarchy from a hairline rule, never from a size jump. */
+.sl-markdown-content h2 {
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--sl-color-hairline);
+}
+
+.sl-markdown-content :is(p, li) {
+  line-height: 1.65;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+
+/* ---- Flat surfaces: borders, never shadows ---- */
+
+.sl-markdown-content :is(table, pre, blockquote, .starlight-aside) {
+  border: 1px solid var(--quiet-border) !important;
+  border-radius: 0.5rem;
+  box-shadow: none !important;
+}
+
+.sl-markdown-content th {
+  background: var(--sl-color-gray-7);
+  font-weight: 500;
+  font-size: var(--sl-text-body-sm);
+}
+
+.sl-markdown-content :is(th, td) {
+  border-color: var(--sl-color-hairline) !important;
+}
+
+.sl-markdown-content blockquote {
+  padding: 0.75rem 1rem;
+  border-left-width: 1px !important;
+  font-style: normal;
+}
+
+.sl-markdown-content code:not(:where(pre code)) {
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+  font-size: var(--sl-text-code-sm);
+}
+
+/* ---- Chrome runs quiet at 12px ---- */
+
+.sidebar-content a,
+starlight-menu-button button,
+.right-sidebar a {
+  font-size: var(--sl-text-body-sm);
+}
+
+.sidebar-content summary,
+.sidebar-content .large,
+.right-sidebar h2 {
+  font-size: var(--sl-text-body-sm);
+  font-weight: 500;
+  color: var(--sl-color-gray-3);
+}
+
+header.header {
+  border-bottom: 1px solid var(--sl-color-hairline);
+  box-shadow: none;
+}
+
+/* The wordmark is the lowercase name itself. */
+.site-title {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* No rails. The sidebar is separated by whitespace, not by lines. */
+@media (min-width: 50em) {
+  #starlight__sidebar {
+    border-right: 0;
+  }
+}
+
+.sidebar-content :is(ul, li) {
+  border-inline-start: 0;
+  padding-inline-start: 0;
+}
+
+.sidebar-content ul ul {
+  padding-inline-start: 0.75rem;
+}
+
+/* Motion is fast and factual, and always has a reduced-motion branch. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---- Theme crossfade ----
+   The button drives the timing via the View Transitions API, so the browser's default
+   cross-fade is disabled here and the new root is layered over the old. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 2;
+}
+
+/* Page navigation keeps its own quick fade; the theme swap owns the slower one. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+}
+
+/* ---- Navigation state ----
+   Starlight marks the current page with a solid accent-filled bar. That is the loudest element on
+   the page and it left grey text on blue. In this register the current item is simply ink and a
+   little heavier, with a hairline marking position. */
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="page"]:focus {
+  background-color: transparent;
+  color: var(--sl-color-white);
+  font-weight: 500;
+}
+
+.sidebar-content a:hover {
+  background-color: transparent;
+  color: var(--sl-color-white);
+}
+
+/* The table of contents follows the same rule. */
+.right-sidebar a[aria-current="true"] {
+  color: var(--sl-color-white);
+  font-weight: 500;
+}
+
+/* ---- Text rendering ---- */
+
+body {
+  /* antialiased alone only covers WebKit; macOS Firefox still renders heavy without this. */
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings balance across lines; body copy avoids a one-word last line. */
+.sl-markdown-content :is(h1, h2, h3, h4) {
+  text-wrap: balance;
+}
+
+.sl-markdown-content :is(p, li) {
+  text-wrap: pretty;
+}
+
+/* Long identifiers and URLs must not escape the measure. */
+.sl-markdown-content :is(p, li, td) {
+  overflow-wrap: break-word;
+}
+
+::selection {
+  background: var(--sl-color-accent-low);
+}
+
+/* ---- Table density ----
+   Starlight's default cell padding leaves rows looking loose at this measure, which made the
+   reference tables read as a sparse grid rather than a scannable list. */
+.sl-markdown-content :is(th, td) {
+  padding: 0.5rem 0.75rem;
+  line-height: 1.5;
+}
+
+.sl-markdown-content table {
+  font-size: var(--sl-text-body-sm);
+}
+
+/* ---- Press feedback ----
+   Tactile response on the controls that have a pressed state. 0.96 — anything lower exaggerates. */
+.sl-markdown-content a,
+.sidebar-content a,
+.right-sidebar a {
+  transition-property: color, background-color;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.quiet-theme-toggle .dot {
+  transition-property: background-color, scale;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.quiet-theme-toggle:active .dot {
+  scale: 0.96;
+}

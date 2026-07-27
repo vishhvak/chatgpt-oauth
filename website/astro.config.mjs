@@ -52,6 +52,16 @@ export default defineConfig({
             "})()",
           ].join(""),
         },
+        // The script above fixes data-theme before first paint, but the theme's background colours
+        // live in common.css, which arrives later. In the gap the canvas is UA-default white, so a
+        // dark-theme reload blinks white. Inline, so it exists from the first byte of <head>; the
+        // values mirror --sl-color-bg in quiet.css and must move with it.
+        {
+          tag: "style",
+          content:
+            ':root{background-color:#ffffff;color-scheme:light}' +
+            ':root[data-theme="dark"]{background-color:#262626;color-scheme:dark}',
+        },
       ],
       editLink: { baseUrl: `${repo}/edit/main/docs/` },
       lastUpdated: true,

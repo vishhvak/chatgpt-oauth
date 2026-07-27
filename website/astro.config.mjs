@@ -33,12 +33,14 @@ export default defineConfig({
           tag: "script",
           content: [
             "(function(){",
-            // Resolve once, then persist an explicit value. A legacy 'auto' from Starlight's old
-            // <select> resolves to the system preference here but to dark in Starlight's own
-            // script, so leaving it stored makes the theme depend on which script ran last.
+            // Resolve but never write: only the toggle stores a value. Persisting the resolution
+            // here turned any transient empty read (a site-data-cleaning extension wiping storage
+            // mid-refresh, seen in the field) into a stored theme the user never chose. A legacy
+            // 'auto' from Starlight's old <select> would resolve to dark in Starlight's script and
+            // to the system preference here, so it is normalized in memory each load instead.
             "function r(){var t=null;try{t=localStorage.getItem('starlight-theme')}catch(e){}",
-            "if(t!=='light'&&t!=='dark'){t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';",
-            "try{localStorage.setItem('starlight-theme',t)}catch(e){}}return t}",
+            "if(t!=='light'&&t!=='dark'){t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}",
+            "return t}",
             "function a(d){d.documentElement.dataset.theme=r();d.documentElement.style.colorScheme=r()}",
             "a(document);",
             // Before the swap so the incoming document is already correct, and after it so nothing

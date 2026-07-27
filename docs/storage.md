@@ -42,9 +42,8 @@ UPDATE credentials
 -- 0 rows affected -> CAS lost; re-read and return the winner as `current`.
 ```
 
-If CAS is not atomic, two concurrent refreshes can each believe they won, and one silently
-overwrites a newer token with an older one. The failure looks like random logouts under load, which
-is about the worst bug to debug.
+If CAS is not atomic, two concurrent refreshes can each believe they won. The failure looks like
+random logouts under load, which is about the worst bug to debug.
 
 On a conflict you must return the **current winner**, not just `ok: false`. Callers adopt it
 instead of issuing a second refresh.
@@ -62,8 +61,8 @@ row as the ciphertext, and never checked into the repository.
 ### 3. Fail loudly, never emptily
 
 A decrypt failure, a bad authentication tag, or an I/O error must raise a **store** error. Returning
-`null` instead says "this user never signed in", which silently discards a live credential and
-re-prompts a user whose session was fine. See [Errors](./errors.md#store--never-means-logged-out).
+`null` says "this user never signed in", which discards a live credential and re-prompts a user
+whose session was fine. See [Errors](./errors.md#store--never-means-logged-out).
 
 ## Also worth getting right
 

@@ -14,9 +14,9 @@ A **subject** is a stable identifier for one user of *your* application, derived
 authenticated session. `usr_8f21`, a database primary key, a tenant id: whatever your app already
 trusts. The library never invents one and never reads one off the wire.
 
-This is enforced structurally rather than by convention: every store method and every session method
-takes the subject as its first argument, so there is no API shape that could read an ambient
-credential. An empty or blank subject is rejected outright.
+Enforced structurally, not by convention: the subject is the first argument of every store and
+session method, so no API shape can read an ambient credential. Empty and blank subjects are
+rejected outright.
 
 Three things are **not** subjects, no matter how convenient they look:
 
@@ -36,9 +36,9 @@ compareAndSwap(subject, expectedVersion, next) -> { ok, current }
 The write lands only if the stored version still equals `expectedVersion`; otherwise it fails and
 hands back the winner. A missing record is version `0`.
 
-This exists because refresh is a read-modify-write across a network call, and two processes can
-easily overlap. Without CAS, the slower one overwrites a newer token with an older one and the user
-gets logged out for no reason. With CAS, the loser adopts the winner and moves on.
+Refresh is a read-modify-write across a network call, so two processes overlap easily. Without CAS
+the slower one overwrites a newer token with an older one and the user is logged out for no reason.
+With CAS the loser adopts the winner and moves on.
 
 If you write a custom store, **this atomicity is your responsibility** and it is the one thing that
 must not be approximated. See [Storage](./storage.md).
@@ -49,19 +49,18 @@ Access tokens are short-lived and refreshed when they come within 120 seconds of
 concurrent requests all notice staleness at once, you want one refresh, not twenty: a refresh token
 may rotate, and spending it twenty times is how you end up with nineteen failures.
 
-So refreshes are deduplicated per `(store, subject)`. Every caller joins the one in-flight refresh.
-Note the key: it is scoped to the **store instance**, not to a session object, so building a fresh
-session per request over a shared store still collapses correctly.
+So refreshes are deduplicated per `(store, subject)`, and every caller joins the one in flight. The
+key is scoped to the **store instance**, not to a session object, so a fresh session per request
+over a shared store still collapses correctly.
 
-The deduplication is in-process. Multiple server replicas can still refresh concurrently: that is
-what CAS is for, and it is why the refresh re-reads the record inside the critical section rather
-than trusting what it read before waiting.
+The deduplication is in-process. Replicas can still refresh concurrently: that is what CAS is for,
+and it is why the refresh re-reads the record inside the critical section rather than trusting what
+it read before waiting.
 
 ## 4. Quarantine
 
 A terminal rejection means the refresh token was revoked, or rotated away by a sign-in elsewhere.
-The credential is dead. No amount of retrying fixes it; only a fresh sign-in
-does.
+The credential is dead, and only a fresh sign-in replaces it.
 
 Rather than throwing the same error forever, that generation is marked **quarantined**, and every
 later request for that subject fails immediately with `reauth_required` and no network call. Your
@@ -89,7 +88,7 @@ A request for an access token walks all four:
 3. If the token is fresh, return it. Otherwise join the **singleflight** refresh (3).
 4. Inside the refresh, re-read, call OpenAI, then **compare-and-swap** the result (2). If CAS loses,
    adopt the winner rather than refreshing again.
-5. If OpenAI's rejection was terminal, CAS a **quarantine** marker against that exact generation (4)
-   If a healthy newer generation won the race, adopt it and quarantine nothing.
+5. If OpenAI's rejection was terminal, CAS a **quarantine** marker against that exact generation
+   (4). If a healthy newer generation won the race, adopt it and quarantine nothing.
 
 Every port implements exactly this. A behaviour difference between them is a bug.

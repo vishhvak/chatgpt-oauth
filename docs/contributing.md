@@ -9,9 +9,8 @@ description: Getting four toolchains running, and the rule that governs every ch
 ports is a bug**.
 
 So the first question for any behavioural change is not "does this work" but "do the other three do
-it this way". Fixing a bug in one port without checking the other three leaves the repository less
-consistent than it found it. When three ports agree and one differs, the odd one out is usually
-wrong: that asymmetry is the sharpest bug-finding tool this repository has.
+it this way". When three ports agree and one differs, the odd one out is usually wrong: that
+asymmetry is the sharpest bug-finding tool this repository has.
 
 If a change alters behaviour the protocol specifies, update `PROTOCOL.md` in the same pull request.
 
@@ -39,7 +38,7 @@ cd kotlin
 cd swift && swift build && swift test
 ```
 
-These are exactly what CI runs. If they pass locally they pass there.
+These are exactly what CI runs.
 
 ### Two environment traps
 
@@ -93,6 +92,6 @@ Swift and Kotlin, which have no confirmed production use.
 
 ## Publishing
 
-Four packages across three registries, and their versions have drifted before. Bump them together,
-tag the release, and remember that the Swift package is consumed by vendoring the `swift/` subtree, so a rename there breaks
-vendored copies until they re-sync.
+Four packages across three registries, and their versions have drifted before. Bump them together
+and tag the release. The Swift package is consumed by vendoring the `swift/` subtree, so a rename
+there breaks vendored copies until they re-sync.

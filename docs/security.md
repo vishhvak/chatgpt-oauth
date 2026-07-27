@@ -6,8 +6,8 @@ description: What the library guarantees, what it does not, and what to check be
 ## What the library handles
 
 - **Tokens never appear in errors or logs.** `Bearer` values, the four JSON and form token fields,
-  and bare JWTs are stripped from every thrown message, log line, and nested diagnostic: redacted
-  before truncation, so a cut string cannot defeat the scrubber. Enforced by tests in every port.
+  and bare JWTs are redacted before truncation, so a cut string cannot defeat the scrubber. Enforced
+  by tests in every port; [Errors](./errors.md#errors-never-contain-secrets) lists the surfaces.
 - **Callback state is compared in constant time**, and validated before the `code` or `error`
   parameter is read at all.
 - **The loopback listener binds `127.0.0.1` only**, never `0.0.0.0`. It accepts one path, stops after
@@ -30,7 +30,8 @@ See [Storage](./storage.md).
 state-changing endpoints in your application, and they need whatever protection the rest of your
 app uses.
 
-**Transport to your own server.** HTTPS, cookie flags, the usual.
+**Transport to your own server.** HTTPS, and `Secure`, `HttpOnly` and `SameSite` on whichever cookie
+carries the session your subjects are derived from.
 
 ## JWT claims are unverified, by design
 

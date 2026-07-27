@@ -3,8 +3,8 @@ title: Errors
 description: The eight typed failures, what causes each, and what your application should do.
 ---
 
-Every public failure carries a stable `code`. **Branch on the code, never on the message text.** Messages are redacted, truncated, and free to
-change. Codes are contract.
+Every public failure carries a stable `code`. **Branch on the code, never on the message text.**
+Messages are redacted, truncated, and free to change. Codes are contract.
 
 ## The table
 
@@ -74,8 +74,8 @@ You do not need to build these; the library already does:
 - **Requests** retry exactly once on a `401`, forcing a refresh first. A second `401` is `auth` and
   is not retried again.
 
-So by the time an error reaches you, the sensible automatic recovery has already been tried. Adding
-your own retry loop around `rate_limit` or `token_refresh` mostly adds load.
+By the time an error reaches you the sensible recovery has already been tried, so your own retry
+loop around `rate_limit` or `token_refresh` mostly adds load.
 
 ## Errors never contain secrets
 

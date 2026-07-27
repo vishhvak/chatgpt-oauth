@@ -1,0 +1,18 @@
+<!--
+  Monoline key. Used as a CSS mask so the fill is currentColor and it inverts with the theme for
+  free. Colour here is irrelevant: mask-image reads alpha, not hue.
+
+  Deliberately not the gold beveled mark on the portfolio grid. That one is built from OpenAI's
+  knot, and this project's README opens by saying it is not an official OpenAI SDK. A mark that
+  reads as OpenAI's undercuts that sentence. Same silhouette, no knot.
+
+  The dot at the centre of the bow is the subject: one key, one user, one credential row.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000"
+     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="8.5" cy="12" r="5" />
+  <circle cx="8.5" cy="12" r="1.75" fill="#000" stroke="none" />
+  <path d="M13.5 12h8" />
+  <path d="M17.5 12v3.5" />
+  <path d="M21.5 12v2.5" />
+</svg>

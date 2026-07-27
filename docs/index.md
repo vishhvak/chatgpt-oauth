@@ -3,9 +3,8 @@ title: chatgpt-oauth
 description: OAuth and subscription transport for apps whose users bring their own ChatGPT account.
 ---
 
-Your users have ChatGPT subscriptions. This lets them spend those subscriptions inside your
-application instead of you paying per token: one OAuth flow, four language ports, one shared wire
-protocol.
+Let your users spend their own ChatGPT subscriptions inside your application instead of you paying
+per token: one OAuth flow, four language ports, one shared wire protocol.
 
 > **Unofficial.** Every port rides the Codex CLI's public OAuth client and an undocumented ChatGPT
 > backend. OpenAI can change or disable it without notice. Treat refresh tokens like passwords,
@@ -37,8 +36,8 @@ const token = await auth.getAccessToken(session.userId);
 const token = await auth.getAccessToken(request.body.userId);
 ```
 
-Get this wrong and one user spends another user's ChatGPT subscription. Everything else in these
-docs is downstream of it: see [Concepts](./concepts.md).
+Get this wrong and one user spends another user's ChatGPT subscription.
+[Concepts](./concepts.md) explains the custody model that prevents it.
 
 ## What maturity to expect
 

@@ -1,0 +1,16 @@
+<!--
+  Same geometry as mark.svg. A favicon cannot inherit currentColor, so the two themes are resolved
+  here against the same ink values quiet.css uses (#171717 light, #f5f5f5 dark).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <style>
+    svg { color: #171717 }
+    @media (prefers-color-scheme: dark) { svg { color: #f5f5f5 } }
+  </style>
+  <circle cx="8.5" cy="12" r="5" />
+  <circle cx="8.5" cy="12" r="1.75" fill="currentColor" stroke="none" />
+  <path d="M13.5 12h8" />
+  <path d="M17.5 12v3.5" />
+  <path d="M21.5 12v2.5" />
+</svg>

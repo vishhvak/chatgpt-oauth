@@ -205,11 +205,40 @@ header.header {
   box-shadow: none;
 }
 
+/* Past Starlight's 72rem breakpoint the measure is pushed flush against the table of contents:
+   computed `margin-inline: calc(100% - var(--sl-content-width)) 0`. Measured at 2560px that left
+   616px of nothing between the sidebar and the first word, and 25px on the other side. Centring the
+   container in the panel splits that evenly (320px each side) so the text sits where the eye
+   already is. Capping .page instead does not work: the sidebar is position:fixed and ignores it. */
+@media (min-width: 72rem) {
+  .content-panel .sl-container {
+    margin-inline: auto;
+  }
+}
+
 /* The wordmark is the lowercase name itself. */
 .site-title {
   font-size: 0.9375rem;
   font-weight: 500;
   letter-spacing: -0.01em;
+  /* Starlight's 24px nav gap is sized for a logo image. Against a 17px mark it read as two
+     separate elements rather than one lockup. */
+  gap: 0.5rem;
+}
+
+/* A monoline key set near cap height, so it reads as punctuation in front of the wordmark rather
+   than as a logo. Masked instead of <img> so it takes currentColor and inverts with the theme for
+   free, and so it never introduces the gradient/bevel/shadow the register rules out. */
+.site-title::before {
+  content: "";
+  flex: none;
+  display: inline-block;
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: -0.2em;
+  background-color: currentColor;
+  -webkit-mask: url("/mark.svg") center / contain no-repeat;
+  mask: url("/mark.svg") center / contain no-repeat;
 }
 
 /* No rails. The sidebar is separated by whitespace, not by lines. */
@@ -228,13 +257,25 @@ header.header {
   padding-inline-start: 0.75rem;
 }
 
-/* Motion is fast and factual, and always has a reduced-motion branch. */
+/* Motion is fast and factual, and always has a reduced-motion branch.
+
+   Reduced motion means less movement, not no feedback. The blanket
+   `transition-duration: 0.01ms` this replaced also killed the colour transitions on links and on
+   the theme dot, which carry meaning a user would otherwise have to infer from a hard cut. So
+   animations stop, movement stops, and colour keeps transitioning. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  .quiet-theme-toggle:active .dot,
+  .pagination-links a:active,
+  .sl-markdown-content a:active {
+    scale: 1;
   }
 }
 
@@ -275,9 +316,16 @@ header.header {
   font-weight: 500;
 }
 
+/* The background reset is unconditional, because Starlight's own hover background would otherwise
+   latch on after a tap. Only the ink change is an enhancement, so only it is gated. */
 .sidebar-content a:hover {
   background-color: transparent;
-  color: var(--sl-color-white);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sidebar-content a:hover {
+    color: var(--sl-color-white);
+  }
 }
 
 /* The table of contents follows the same rule. */
@@ -341,4 +389,20 @@ body {
 
 .quiet-theme-toggle:active .dot {
   scale: 0.96;
+}
+
+/* The other two things on the page that are pressed rather than read: the search trigger and the
+   prev/next cards. Both are large targets that gave no acknowledgement of the press at all. Scale
+   is named explicitly rather than folded into a `transition: all`, so nothing else gets dragged
+   into the animation later. */
+site-search button,
+.pagination-links a {
+  transition-property: scale, color, background-color, border-color;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+site-search button:active,
+.pagination-links a:active {
+  scale: 0.98;
 }

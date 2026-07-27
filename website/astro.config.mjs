@@ -17,6 +17,9 @@ export default defineConfig({
       description:
         "OAuth and subscription transport for apps whose users bring their own ChatGPT account.",
       social: [{ icon: "github", label: "GitHub", href: repo }],
+      // Same key geometry as public/mark.svg, with the two themes resolved statically because a
+      // favicon cannot inherit currentColor.
+      favicon: "/favicon.svg",
       customCss: ["./src/styles/quiet.css"],
       // Starlight ships the theme control as an icon <select>. The register wants a bare dot.
       components: {

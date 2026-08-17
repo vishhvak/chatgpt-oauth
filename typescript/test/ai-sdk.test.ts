@@ -137,6 +137,79 @@ describe("ai-sdk bridge", () => {
     expect(calls).toBe(2);
   });
 
+  it("recovers the assistant message when the backend closes with an empty output", async () => {
+    // What the subscription backend actually sends, item shapes copied from a
+    // live capture: a reasoning item first, then the message, and finally
+    // `response.completed` carrying `output: []`.
+    const auth = createAuthSession({ store: await seeded() });
+    const chatgpt = createChatGPT(auth, "alice", {
+      fetch: async () =>
+        sse(
+          { type: "response.output_item.done", output_index: 0, item: { id: "rs_1", type: "reasoning", content: [], encrypted_content: "gAAAAAB", summary: [] } },
+          { type: "response.output_item.done", output_index: 1, item: { id: "msg_1", type: "message", status: "completed", content: [{ type: "output_text", annotations: [], logprobs: [], text: "hi" }], phase: "final_answer", role: "assistant" } },
+          { ...COMPLETED, response: { ...COMPLETED.response, output: [] } },
+        ),
+    });
+
+    const result = await generateText({ model: chatgpt("gpt-5.4-mini"), prompt: "hello" });
+
+    expect(result.text).toBe("hi");
+  });
+
+  it("keeps an output the backend already filled in", async () => {
+    // The direct API populates `output`; a stale `output_item.done` must not
+    // displace it or the turn would be duplicated.
+    const auth = createAuthSession({ store: await seeded() });
+    const chatgpt = createChatGPT(auth, "alice", {
+      fetch: async () =>
+        sse(
+          { type: "response.output_item.done", output_index: 0, item: { id: "msg_stale", type: "message", status: "completed", content: [{ type: "output_text", annotations: [], logprobs: [], text: "stale" }], role: "assistant" } },
+          COMPLETED,
+        ),
+    });
+
+    const result = await generateText({ model: chatgpt("gpt-5.4-mini"), prompt: "hello" });
+
+    expect(result.text).toBe("hi");
+  });
+
+  it("drops the sampling parameters the backend refuses", async () => {
+    let sent: Record<string, unknown> | undefined;
+    const auth = createAuthSession({ store: await seeded() });
+    const chatgpt = createChatGPT(auth, "alice", {
+      fetch: async (_input, init) => {
+        sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return sse(COMPLETED);
+      },
+    });
+
+    await generateText({
+      model: chatgpt("gpt-5.4-mini"),
+      prompt: "hello",
+      maxOutputTokens: 256,
+      temperature: 0.2,
+      topP: 0.9,
+      presencePenalty: 0.1,
+      frequencyPenalty: 0.1,
+      seed: 7,
+    });
+
+    // Each of these returns 400 "Unsupported parameter" from the live backend,
+    // so leaving any one in place fails the whole call.
+    for (const parameter of [
+      "max_output_tokens",
+      "temperature",
+      "top_p",
+      "presence_penalty",
+      "frequency_penalty",
+      "seed",
+    ]) {
+      expect(sent).not.toHaveProperty(parameter);
+    }
+    // The request still has to carry the parts the backend does accept.
+    expect(sent).toMatchObject({ model: "gpt-5.4-mini", stream: true, store: false });
+  });
+
   it("surfaces a network failure as a typed, redacted TransportError", async () => {
     const chatgpt = createChatGPT(createAuthSession({ store: await seeded() }), "alice", {
       fetch: async () => {

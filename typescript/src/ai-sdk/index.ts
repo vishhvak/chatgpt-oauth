@@ -24,6 +24,38 @@ function baseUrlFor(responsesUrl: string): string {
 }
 
 /**
+ * Sampling and bookkeeping parameters the subscription backend answers with
+ * `400 Unsupported parameter`, each verified against the live endpoint.
+ *
+ * The SDK emits most of them from ordinary call options, so `temperature: 0.2`
+ * or `maxOutputTokens: 500` would otherwise fail the whole request with a bare
+ * "Bad Request" naming nothing. They are dropped here so no consumer has to
+ * carry a copy of this list. `stream_options` is refused as an unknown
+ * parameter rather than an unsupported one, but is equally fatal.
+ *
+ * Deliberately NOT dropped, because the backend accepts them: `reasoning`,
+ * `include`, `prompt_cache_key`, `service_tier`, `tools`, `tool_choice`, and
+ * `text` (both `verbosity` and a `json_schema` format, so structured outputs
+ * work).
+ */
+const UNSUPPORTED_PARAMETERS = [
+  "frequency_penalty",
+  "logit_bias",
+  "max_output_tokens",
+  "max_tool_calls",
+  "metadata",
+  "presence_penalty",
+  "safety_identifier",
+  "seed",
+  "stream_options",
+  "temperature",
+  "top_logprobs",
+  "top_p",
+  "truncation",
+  "user",
+] as const;
+
+/**
  * Rewrites the SDK's request into the shape the subscription backend accepts.
  * The backend only speaks streaming `store:false`, so non-streaming calls are
  * issued as streams and collapsed back into a single JSON response below.
@@ -33,10 +65,9 @@ function subscriptionBody(raw: string): { body: string; streaming: boolean } {
   if (parsed === null || typeof parsed !== "object") return { body: raw, streaming: false };
   const record = parsed as Record<string, unknown>;
   const streaming = record.stream === true;
-  return {
-    body: JSON.stringify({ ...record, stream: true, store: false, parallel_tool_calls: false }),
-    streaming,
-  };
+  const body: Record<string, unknown> = { ...record, stream: true, store: false, parallel_tool_calls: false };
+  for (const parameter of UNSUPPORTED_PARAMETERS) delete body[parameter];
+  return { body: JSON.stringify(body), streaming };
 }
 
 /** Collapses a completed SSE stream into the single response object `doGenerate` expects. */
@@ -44,7 +75,12 @@ async function collapse(response: Response): Promise<Response> {
   if (response.body === null) throw new TransportError("Subscription transport returned no response stream.");
   let completed: unknown;
   let failure: unknown;
+  const items: unknown[] = [];
   for await (const event of parseSSE(response.body)) {
+    if (event.type === "response.output_item.done") {
+      const { item } = event.data as { item?: unknown };
+      if (item !== undefined) items.push(item);
+    }
     if (event.type === "response.completed") completed = event.data;
     if (event.type === "response.failed" || event.type === "error") failure = event.data;
   }
@@ -53,8 +89,14 @@ async function collapse(response: Response): Promise<Response> {
     throw new TransportError(`Subscription stream ended without a completed response${detail}`);
   }
   const envelope = completed as { response?: unknown };
-  const payload = envelope.response ?? completed;
-  return new Response(JSON.stringify(payload), {
+  const payload = (envelope.response ?? completed) as Record<string, unknown>;
+  // The subscription backend closes with `output: []` and leaves the assistant
+  // message in the `output_item.done` events it already sent, so a payload taken
+  // at face value decodes as a turn that said nothing. The direct API populates
+  // `output`, so an already-filled array is left exactly as it arrived.
+  const restored =
+    Array.isArray(payload.output) && payload.output.length > 0 ? payload : { ...payload, output: items };
+  return new Response(JSON.stringify(restored), {
     status: 200,
     headers: { ...Object.fromEntries(response.headers), "content-type": "application/json" },
   });

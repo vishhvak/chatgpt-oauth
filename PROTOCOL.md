@@ -223,6 +223,8 @@ The body is:
 
 Always set the three fixed fields exactly as shown. Both streaming and collected APIs use `stream: true`.
 
+The backend accepts no sampling or bookkeeping parameters. Sending any of `frequency_penalty`, `logit_bias`, `max_output_tokens`, `max_tool_calls`, `metadata`, `presence_penalty`, `safety_identifier`, `seed`, `temperature`, `top_logprobs`, `top_p`, `truncation`, or `user` fails the whole request with `400 {"detail":"Unsupported parameter: <name>"}`; `stream_options` fails the same way as an unknown parameter. A client that forwards a generic request object must drop these rather than pass them through, because the error names only the first offender and carries no other context. Verified against the live backend. `prompt_cache_key`, `service_tier`, `include`, `reasoning`, `tools`, `tool_choice`, and `text` (both `verbosity` and a `json_schema` format) are accepted.
+
 `input` must be a list — the backend rejects a bare string with `400 {"detail":"Input must be a list"}`. Client APIs that accept plain text must wrap it as one user message before sending: `[{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<text>"}]}]`.
 
 Response handling:
@@ -244,7 +246,9 @@ Decode UTF-8 incrementally. Normalize CRLF/CR to LF. Buffer until a blank line. 
 6. Use JSON `type` when it is a string, otherwise the SSE event name.
 7. Forward unknown types unchanged.
 8. For `response.output_text.delta`, expose and accumulate string `delta`.
-9. Retain `response.completed` data as response metadata. Text usually comes from accumulated deltas.
+9. Retain `response.completed` data as response metadata. Text comes from accumulated deltas.
+
+This backend closes with `output: []` inside `response.completed`, unlike the direct API, which populates it. The turn's items are only ever delivered by the `response.output_item.done` events that precede it. A client that merely accumulates deltas is unaffected, which is why the Python, Kotlin and Swift clients never saw this. A client that rebuilds a whole response object, as the TypeScript AI SDK bridge must, has to collect those items itself and treat a nonempty `output` as authoritative when one is present.
 10. At EOF, parse a nonempty trailing block even without a final blank line.
 
 Concrete split example: one network chunk may end at `response.output_` and the next begin with `text.delta`; the parser must emit one event, not two or zero.

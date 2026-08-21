@@ -65,6 +65,10 @@
       "types": "./dist/react-native/index.d.ts",
       "import": "./dist/react-native/index.js"
     },
+    "./realtime": {
+      "types": "./dist/realtime/index.d.ts",
+      "import": "./dist/realtime/index.js"
+    },
     "./web": {
       "types": "./dist/web/index.d.ts",
       "import": "./dist/web/index.js"

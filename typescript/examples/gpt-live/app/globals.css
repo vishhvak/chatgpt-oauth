@@ -1,0 +1,124 @@
+/* The orb component ships with Tailwind class names; these five are all it uses. Defining them
+   here keeps the example free of a CSS toolchain. */
+.relative { position: relative; }
+.overflow-hidden { overflow: hidden; }
+.rounded-full { border-radius: 9999px; }
+.h-full { height: 100%; }
+.w-full { width: 100%; }
+
+:root {
+  color-scheme: dark;
+  --bg: #0a0a0f;
+  --fg: #ededf2;
+  --muted: #85879c;
+  --line: #1e1f2b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.6 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 3rem 1.25rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: 0;
+  max-width: 34rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.call {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 34rem;
+}
+
+.phase {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.action {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #14141d;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 0.55rem 1.35rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.action:hover { background: #1b1b26; border-color: #2b2c3a; }
+.action:focus-visible { outline: 2px solid #7c5cff; outline-offset: 2px; }
+
+.error {
+  margin: 0;
+  color: #ff8f8f;
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.transcript {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+.line {
+  margin: 0;
+  font-size: 0.875rem;
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+
+.who {
+  flex: none;
+  width: 4.5rem;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.line-user { color: var(--fg); }
+.line-assistant { color: #b9a8ff; }
+.line-delegate { color: #f2a33c; }
+
+@media (prefers-reduced-motion: reduce) {
+  .action { transition: none; }
+}

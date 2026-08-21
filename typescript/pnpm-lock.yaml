@@ -17,7 +17,7 @@ importers:
     devDependencies:
       '@ai-sdk/openai':
         specifier: ^4.0.17
-        version: 4.0.17(zod@3.25.76)
+        version: 4.0.20(zod@3.25.76)
       '@eslint/js':
         specifier: ^9.32.0
         version: 9.39.5
@@ -78,8 +78,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/openai@4.0.17':
-    resolution: {integrity: sha512-Zme92Jvleq2kC11/vvqaA37Q2ihRXpLTLuTwQMo1zYOjK+K7+9PmWIuSI+En5ws6EQ7/nwcfCWlP3YeRfh5VbQ==}
+  '@ai-sdk/openai@4.0.20':
+    resolution: {integrity: sha512-/Hu+btLIO2zuYqCp//vBBAGdM/BeN4gds+NWrlv7Y9WrcTXwnEEwh6P3QZIWh2Tt1I1lswuDIpAJ4t/c/rws3Q==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -3508,7 +3508,7 @@ snapshots:
       '@vercel/oidc': 3.2.0
       zod: 3.25.76
 
-  '@ai-sdk/openai@4.0.17(zod@3.25.76)':
+  '@ai-sdk/openai@4.0.20(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 4.0.3
       '@ai-sdk/provider-utils': 5.0.12(zod@3.25.76)

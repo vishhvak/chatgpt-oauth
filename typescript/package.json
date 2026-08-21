@@ -1,6 +1,6 @@
 {
   "name": "chatgpt-oauth",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Experimental, cross-platform OAuth and subscription client for ChatGPT accounts",
   "type": "module",
   "license": "MIT",

@@ -6,6 +6,23 @@ released by git tag.
 
 While the project is `0.x`, behaviour changes bump the minor.
 
+## 0.3.1
+
+### Added
+
+- **`chatgpt-oauth/realtime/browser`** collapses the browser handshake into one `connectLiveCall`
+  call. It exists because the ordering is load-bearing and fails silently: a data channel created
+  after `createOffer` never reaches the SDP, leaving a live call with no event channel. Echo
+  cancellation is requested by default, without which the model hears its own voice. Kept as a
+  separate entry point so the core stays free of DOM types and keeps running in Node and in tests
+  with no WebRTC at all.
+
+Considered and rejected in the same pass: porting the PCM capture and playback stack from the
+t3code voice prototype. That machinery serves the chunked-audio WebSocket wire, which a
+subscription token cannot open (`realtime conversation requires API key auth`). Over WebRTC the
+browser carries audio as media tracks and no PCM ever passes through JavaScript, so importing it
+would have added real complexity for a transport these users cannot reach.
+
 ## 0.3.0
 
 Two new TypeScript surfaces, both reached over the same subscription credential the library already
@@ -27,13 +44,6 @@ them cannot be ported without a WebRTC stack.
   are hints rather than instructions, requests take 16 to 63 seconds so cancellation is a
   first-class option, and the gate is the account plan rather than credits, which is why a `403`
   reports a plan problem instead of implying a bad token.
-
-- **`chatgpt-oauth/realtime/browser`** collapses the browser handshake into one `connectLiveCall`
-  call. It exists because the ordering is load-bearing and fails silently: a data channel created
-  after `createOffer` never reaches the SDP, leaving a live call with no event channel. Echo
-  cancellation is requested by default, without which the model hears its own voice. Kept as a
-  separate entry point so the core stays free of DOM types and keeps running in Node and in tests
-  with no WebRTC at all.
 
 Both surfaces read undocumented backend endpoints and can break without notice. The warning at the
 top of the README applies to them in full.

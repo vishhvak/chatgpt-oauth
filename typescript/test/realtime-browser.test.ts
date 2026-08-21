@@ -14,12 +14,16 @@ interface Recorder {
 /** Minimal RTCPeerConnection stand-in that records the order of the calls that matter. */
 function fakePeerConnection(recorder: Recorder) {
   return class {
-    localDescription: unknown = null;
+    localDescription: { sdp?: string } | null = null;
     remoteDescription: unknown = null;
+    iceGatheringState = "complete";
     listeners: Record<string, ((event: unknown) => void)[]> = {};
 
     addEventListener(type: string, listener: (event: unknown) => void) {
       (this.listeners[type] ??= []).push(listener);
+    }
+    removeEventListener(type: string, listener: (event: unknown) => void) {
+      this.listeners[type] = (this.listeners[type] ?? []).filter((entry) => entry !== listener);
     }
     addTrack() {
       recorder.order.push("addTrack");
@@ -32,7 +36,7 @@ function fakePeerConnection(recorder: Recorder) {
       recorder.order.push("createOffer");
       return { type: "offer", sdp: "local-offer-sdp" };
     }
-    async setLocalDescription(description: unknown) {
+    async setLocalDescription(description: { sdp?: string }) {
       this.localDescription = description;
     }
     async setRemoteDescription(description: unknown) {
@@ -48,12 +52,13 @@ function fakePeerConnection(recorder: Recorder) {
 function install(recorder: Recorder, options: { getUserMedia?: () => Promise<unknown> } = {}) {
   const tracks = [{ stop: vi.fn() }];
   const stream = { getAudioTracks: () => tracks, getTracks: () => tracks };
-  vi.stubGlobal("RTCPeerConnection", fakePeerConnection(recorder));
+  const PeerBase = fakePeerConnection(recorder);
+  vi.stubGlobal("RTCPeerConnection", PeerBase);
   vi.stubGlobal("Audio", class { srcObject: unknown = null; async play() {} });
   vi.stubGlobal("navigator", {
     mediaDevices: { getUserMedia: options.getUserMedia ?? (async () => stream) },
   });
-  return { stream, tracks };
+  return { stream, tracks, PeerBase };
 }
 
 describe("connectLiveCall", () => {
@@ -71,6 +76,35 @@ describe("connectLiveCall", () => {
     expect(channelIndex).toBeLessThan(offerIndex);
     expect(trackIndex).toBeLessThan(offerIndex);
     expect(recorder.order.indexOf("setRemoteDescription")).toBeGreaterThan(offerIndex);
+  });
+
+  it("waits for ICE gathering and sends the gathered SDP, not the pre-gathering one", async () => {
+    const recorder: Recorder = { order: [] };
+    const { PeerBase } = install(recorder);
+    let finishGathering = (): void => undefined;
+
+    class GatheringPeer extends PeerBase {
+      override iceGatheringState = "gathering";
+      override localDescription: { sdp?: string } | null = null;
+
+      constructor() {
+        super();
+        finishGathering = () => {
+          this.iceGatheringState = "complete";
+          this.localDescription = { sdp: "local-offer-sdp+candidates" };
+          for (const listener of this.listeners["icegatheringstatechange"] ?? []) listener({});
+        };
+      }
+    }
+    vi.stubGlobal("RTCPeerConnection", GatheringPeer);
+
+    const negotiate = vi.fn(async () => ANSWER_SDP);
+    const pending = connectLiveCall({ negotiate, iceGatheringTimeoutMs: 1_000 });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(negotiate).not.toHaveBeenCalled(); // still gathering: the offer must not have shipped
+    finishGathering();
+    await pending;
+    expect(negotiate).toHaveBeenCalledWith("local-offer-sdp+candidates");
   });
 
   it("hands the local offer to negotiate and applies the returned answer", async () => {

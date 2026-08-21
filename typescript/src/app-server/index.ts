@@ -7,9 +7,15 @@ import { extractUnverifiedClaims } from "../core/jwt.js";
 import { redact } from "../core/redact.js";
 import { AppServerError } from "./errors.js";
 import { spawnAppServer } from "./process.js";
+import { startLiveCall, type AppServerLiveCall, type AppServerLiveCallOptions } from "./realtime.js";
 import { createRpcConnection, type RpcConnection } from "./rpc.js";
 
 export { AppServerError, AppServerRpcError } from "./errors.js";
+export type {
+  AppServerLiveCall,
+  AppServerLiveCallOptions,
+  LiveCallHandlers,
+} from "./realtime.js";
 
 export interface AppServerClientOptions {
   codexBin?: string;
@@ -17,10 +23,21 @@ export interface AppServerClientOptions {
   env?: Record<string, string>;
   onNotification?: (notification: unknown) => void;
   onRateLimits?: (snapshot: RateLimitSnapshot) => void;
+  /**
+   * Enables full-duplex voice: codex is launched with its experimental realtime feature and the
+   * handshake requests the experimental API. Off by default because both are marked experimental
+   * upstream and the flag changes what the spawned binary will accept.
+   */
+  realtime?: boolean;
 }
 
 export type AppServerClient = SubscriptionAI & {
   getRateLimits(): Promise<RateLimitSnapshot>;
+  /**
+   * Opens a voice call answered by a codex thread. Requires `realtime: true` at creation;
+   * without it codex refuses the realtime methods.
+   */
+  startLiveCall(options: AppServerLiveCallOptions): Promise<AppServerLiveCall>;
   close(): Promise<void>;
 };
 
@@ -139,6 +156,7 @@ export async function createAppServerClient(
   options: AppServerClientOptions = {},
 ): Promise<AppServerClient> {
   const processHandle = await spawnAppServer(options);
+  const realtimeListeners = new Set<(notification: { method: string; params?: unknown }) => void>();
   let threadId: string | undefined;
   let threadPromise: Promise<string> | undefined;
   let threadInstructions: string | undefined;
@@ -212,6 +230,10 @@ export async function createAppServerClient(
     if (notification.method === "account/rateLimits/updated") {
       publishRateLimits(mapRateLimits(params));
     }
+    for (const listener of realtimeListeners) {
+      try { listener(notification); }
+      catch { /* One call's listener must not break dispatch for the rest. */ }
+    }
     try { options.onNotification?.(notification); }
     catch { /* Consumer notification hooks must not break protocol dispatch. */ }
   }
@@ -250,6 +272,7 @@ export async function createAppServerClient(
   try {
     await rpc.request("initialize", {
       clientInfo: { name: "chatgpt-oauth", title: "ChatGPT OAuth App Server", version: "0.1.0" },
+      ...(options.realtime === true ? { capabilities: { experimentalApi: true } } : {}),
     });
     rpc.notify("initialized");
     const accessToken = await auth.getAccessToken(subject);
@@ -339,6 +362,23 @@ export async function createAppServerClient(
     respond,
     stream,
     getRateLimits,
+    async startLiveCall(callOptions: AppServerLiveCallOptions): Promise<AppServerLiveCall> {
+      if (options.realtime !== true) {
+        throw new AppServerError(
+          "startLiveCall requires the client to be created with realtime: true.",
+        );
+      }
+      return startLiveCall(
+        {
+          request: (method, params) => rpc.request(method, params),
+          subscribe(listener) {
+            realtimeListeners.add(listener);
+            return () => realtimeListeners.delete(listener);
+          },
+        },
+        callOptions,
+      );
+    },
     async close() {
       const failure = new AppServerError("Codex app-server client closed.");
       if (active !== undefined) {

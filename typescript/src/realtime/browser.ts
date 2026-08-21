@@ -28,6 +28,12 @@ export interface BrowserCallOptions extends LiveSessionHandlers {
   /** Passed to `getUserMedia`. Echo cancellation is on by default; without it the model hears itself. */
   audioConstraints?: MediaTrackConstraints;
   peerConnectionConfig?: RTCConfiguration;
+  /**
+   * Cap on waiting for ICE candidate gathering before the offer is sent. The offer must carry
+   * gathered candidates or the backend has no route back to this client, but a stalled gatherer
+   * must not hang the connect forever. Defaults to 5000ms; 0 sends the offer ungathered.
+   */
+  iceGatheringTimeoutMs?: number;
 }
 
 export interface BrowserCall {
@@ -37,6 +43,25 @@ export interface BrowserCall {
   microphone: MediaStream;
   /** Stops the microphone, closes the peer connection, and asks the backend to end the session. */
   hangUp: () => void;
+}
+
+const DEFAULT_ICE_GATHERING_TIMEOUT_MS = 5_000;
+
+/** Resolves when gathering completes, or after the cap; never rejects. */
+function waitForIceGathering(connection: RTCPeerConnection, timeoutMs: number): Promise<void> {
+  if (timeoutMs <= 0 || connection.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, timeoutMs);
+    function finish(): void {
+      clearTimeout(timer);
+      connection.removeEventListener("icegatheringstatechange", onChange);
+      resolve();
+    }
+    function onChange(): void {
+      if (connection.iceGatheringState === "complete") finish();
+    }
+    connection.addEventListener("icegatheringstatechange", onChange);
+  });
 }
 
 const DEFAULT_AUDIO: MediaTrackConstraints = {
@@ -53,7 +78,14 @@ const DEFAULT_AUDIO: MediaTrackConstraints = {
  * The microphone track must also be added before the offer for the same reason.
  */
 export async function connectLiveCall(options: BrowserCallOptions): Promise<BrowserCall> {
-  const { negotiate, audioElement, audioConstraints, peerConnectionConfig, ...handlers } = options;
+  const {
+    negotiate,
+    audioElement,
+    audioConstraints,
+    peerConnectionConfig,
+    iceGatheringTimeoutMs,
+    ...handlers
+  } = options;
 
   const connection = new RTCPeerConnection(peerConnectionConfig);
   const sink = audioElement ?? new Audio();
@@ -84,9 +116,15 @@ export async function connectLiveCall(options: BrowserCallOptions): Promise<Brow
 
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
-    if (offer.sdp === undefined) throw new Error("Offer contained no SDP.");
+    await waitForIceGathering(
+      connection,
+      iceGatheringTimeoutMs ?? DEFAULT_ICE_GATHERING_TIMEOUT_MS,
+    );
+    // Read back the local description: it accumulates the gathered candidates the offer lacked.
+    const offerSdp = connection.localDescription?.sdp ?? offer.sdp;
+    if (offerSdp === undefined) throw new Error("Offer contained no SDP.");
 
-    const answerSdp = await negotiate(offer.sdp);
+    const answerSdp = await negotiate(offerSdp);
     await connection.setRemoteDescription({ type: "answer", sdp: answerSdp });
 
     return {

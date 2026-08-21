@@ -12,6 +12,8 @@ export interface AppServerProcessOptions {
   codexBin?: string;
   codexHome?: string;
   env?: Record<string, string>;
+  /** Launches codex with its realtime feature, which is off by default. */
+  realtime?: boolean;
 }
 
 export interface AppServerProcess {
@@ -114,12 +116,21 @@ export async function spawnAppServer(options: AppServerProcessOptions): Promise<
   await assertIsolatedHome(codexHome);
   await mkdir(codexHome, { recursive: true, mode: 0o700 });
   await chmod(codexHome, 0o700);
-  const child = spawn(binary, ["app-server", "-c", 'cli_auth_credentials_store="ephemeral"'], {
-    detached: process.platform !== "win32",
-    env: minimalEnvironment(options.env, codexHome),
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-  });
+  const child = spawn(
+    binary,
+    [
+      "app-server",
+      "-c",
+      'cli_auth_credentials_store="ephemeral"',
+      ...(options.realtime === true ? ["--enable", "realtime_conversation"] : []),
+    ],
+    {
+      detached: process.platform !== "win32",
+      env: minimalEnvironment(options.env, codexHome),
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
   child.stdin.on("error", () => undefined);
 
   let closed = false;

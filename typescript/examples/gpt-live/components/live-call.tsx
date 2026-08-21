@@ -71,7 +71,16 @@ async function askDelegate(prompt: string): Promise<string> {
   return answer
 }
 
+/** Which side owns the realtime session: this app signalling directly, or a codex app-server. */
+type CallRoute = 'direct' | 'codex'
+
+const ROUTE_ENDPOINT: Record<CallRoute, string> = {
+  direct: '/api/call',
+  codex: '/api/call-codex',
+}
+
 export default function LiveCall({ voice = 'cove' }: { voice?: LiveVoice }) {
+  const [route, setRoute] = useState<CallRoute>('direct')
   const [phase, setPhase] = useState<Phase>('idle')
   const [lines, setLines] = useState<Line[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -120,7 +129,7 @@ export default function LiveCall({ voice = 'cove' }: { voice?: LiveVoice }) {
         ...(audioRef.current === null ? {} : { audioElement: audioRef.current }),
         // The peer connection, the mic, and the offer/answer ordering live in the library.
         negotiate: async (offerSdp) => {
-          const response = await fetch('/api/call', {
+          const response = await fetch(ROUTE_ENDPOINT[route], {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ sdp: offerSdp, voice }),
@@ -153,7 +162,7 @@ export default function LiveCall({ voice = 'cove' }: { voice?: LiveVoice }) {
       setError((cause as Error).message)
       hangUp()
     }
-  }, [hangUp, onTurn, record, voice])
+  }, [hangUp, onTurn, record, voice, route])
 
   useEffect(() => () => hangUp(), [hangUp])
 
@@ -164,6 +173,27 @@ export default function LiveCall({ voice = 'cove' }: { voice?: LiveVoice }) {
       <FluidOrb size={260} color={PHASE_COLOR[phase]} />
 
       <p className="phase">{PHASE_LABEL[phase]}</p>
+
+      {!live && (
+        <div className="route" role="radiogroup" aria-label="Who answers the call">
+          <button
+            role="radio"
+            aria-checked={route === 'direct'}
+            className={route === 'direct' ? 'route-on' : ''}
+            onClick={() => setRoute('direct')}
+          >
+            gpt-live + delegate
+          </button>
+          <button
+            role="radio"
+            aria-checked={route === 'codex'}
+            className={route === 'codex' ? 'route-on' : ''}
+            onClick={() => setRoute('codex')}
+          >
+            codex agent
+          </button>
+        </div>
+      )}
 
       <button className="action" onClick={live ? hangUp : () => void connect()}>
         {live ? 'End call' : 'Start call'}

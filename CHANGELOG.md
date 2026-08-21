@@ -6,6 +6,33 @@ released by git tag.
 
 While the project is `0.x`, behaviour changes bump the minor.
 
+## 0.4.0
+
+One theme: the voice surface became adaptable across who owns the realtime session, which was the
+point of splitting signalling from the session loop in 0.3.0.
+
+### Added
+
+- **`startLiveCall` on the app-server client.** The same gpt-live wire, reached the other way
+  around: a spawned codex app-server owns the realtime session (`thread/realtime/start`, WebRTC
+  transport, protocol v3, the only shape a subscription login accepts) and its own thread answers
+  the call, so the voice model's delegate is the coding agent itself and no delegate endpoint is
+  involved. The credential is still this library's: codex receives host-managed tokens and never
+  touches disk. Requires `realtime: true` at client creation, which launches codex with its
+  experimental realtime feature and requests the experimental API at the handshake. Verified live:
+  a synthetic offer through `thread/start`, `thread/realtime/start`, and back returned a real
+  answer from the backend in 649ms on a warm client.
+- **The gpt-live example now has a route picker**: the same browser call connects either through
+  direct signalling with a client-side delegate, or through a codex app-server where the agent
+  answers. One `connectLiveCall`, two owners, which is the adaptability claim made concrete.
+
+### Fixed
+
+- **`connectLiveCall` now waits for ICE candidate gathering** (bounded, default 5s) before sending
+  the offer, and sends the gathered local description rather than the pre-gathering offer. An
+  ungathered offer can leave the backend no route back to the client; the codex path verifiably
+  requires gathered candidates. Configurable via `iceGatheringTimeoutMs`.
+
 ## 0.3.1
 
 ### Added

@@ -122,3 +122,24 @@ h1 {
 @media (prefers-reduced-motion: reduce) {
   .action { transition: none; }
 }
+
+/* Route picker: quiet until a call starts, gone once one is live. */
+.route {
+  display: flex;
+  gap: 6px;
+}
+.route button {
+  border: 1px solid var(--line, #3a3a44);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  opacity: 0.65;
+}
+.route button.route-on {
+  opacity: 1;
+  border-color: currentColor;
+}

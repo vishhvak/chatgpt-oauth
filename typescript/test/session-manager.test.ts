@@ -8,6 +8,7 @@ function fakeClient(label: string): AppServerClient {
     async respond() { return { outputText: label, events: [] }; },
     async *stream() { yield { type: "test", data: label }; },
     async getRateLimits() { return { primary: { usedPercent: 25 } }; },
+    async startLiveCall(): Promise<never> { throw new Error("not under test"); },
     close: vi.fn(async () => undefined),
   };
 }

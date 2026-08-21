@@ -53,6 +53,7 @@ OpenAI. Treat them as unproven until someone reports otherwise.
 | TypeScript `node`, `web`, `next`, `react`, `react-native`, `ai-sdk`, core | in production use, plus tests against mocks |
 | TypeScript `app-server` | tests only, and against a scripted stand-in for the Codex binary rather than the real one |
 | TypeScript `images` | verified live against a Pro account (both endpoints, generation and edit), plus tests against mocks; undocumented backend, see PROTOCOL.md §13 |
+| TypeScript `realtime`, `realtime/browser` | verified live against a Pro account (signalling, delegation, audio both ways); the browser microphone path has never been driven by a human. WebRTC only, so no other port implements it. See PROTOCOL.md §14 |
 | Electron, Tauri | expected to work through the `node` and `web` entries; no specific code, tests, or reported use |
 | Python core, loopback, file store | tests against mocks; no known production use |
 | Kotlin JVM core | tests against mocks; no known production use |
@@ -82,6 +83,14 @@ cd kotlin              && ./gradlew :examples:verify:run --console=plain
 Each prints a URL and a device code, waits for you to approve it, then streams the reply. Where the
 port has a persistent store, credentials are kept, so a second run exercises refresh instead of
 signing in again.
+
+TypeScript carries two more, for the surfaces that exist only there. Both reuse the credentials
+`verify.ts` stores, and both need a paid plan.
+
+```sh
+cd typescript && pnpm dlx tsx examples/images.ts "a lighthouse at dusk"   # generate, then edit
+cd typescript/examples/gpt-live && pnpm install && pnpm dev               # full-duplex voice call
+```
 
 ## The identity rule
 

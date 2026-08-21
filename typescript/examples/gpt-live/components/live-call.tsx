@@ -2,12 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import FluidOrb from '@/components/fluid-orb'
-import {
-  attachLiveSession,
-  type LiveSession,
-  type LiveTurn,
-  type LiveVoice,
-} from 'chatgpt-oauth/realtime'
+import { type LiveSession, type LiveTurn, type LiveVoice } from 'chatgpt-oauth/realtime'
+import { connectLiveCall, type BrowserCall } from 'chatgpt-oauth/realtime/browser'
 
 /**
  * A full-duplex call, not a turn-based one.
@@ -16,8 +12,9 @@ import {
  * button and no push-to-talk, because there is no request/response cycle to attach one to: both
  * sides stream continuously and their turns overlap.
  *
- * The protocol lives in `chatgpt-oauth/realtime`. What is left here is the parts that are
- * genuinely this app's: the peer connection, the delegate call, and the UI.
+ * The protocol lives in `chatgpt-oauth/realtime` and the peer connection in
+ * `chatgpt-oauth/realtime/browser`. What is left here is genuinely this app's: the delegate call
+ * and the UI.
  */
 type Phase = 'idle' | 'connecting' | 'listening' | 'delegating' | 'speaking'
 
@@ -79,9 +76,8 @@ export default function LiveCall({ voice = 'cove' }: { voice?: LiveVoice }) {
   const [lines, setLines] = useState<Line[]>([])
   const [error, setError] = useState<string | null>(null)
 
-  const pcRef = useRef<RTCPeerConnection | null>(null)
+  const callRef = useRef<BrowserCall | null>(null)
   const sessionRef = useRef<LiveSession | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   /** Assistant turns still open, so `speaking` ends only when the last one closes. */
   const openTurns = useRef(new Set<string>())
@@ -108,12 +104,9 @@ export default function LiveCall({ voice = 'cove' }: { voice?: LiveVoice }) {
   )
 
   const hangUp = useCallback(() => {
-    sessionRef.current?.close()
-    pcRef.current?.close()
-    streamRef.current?.getTracks().forEach((track) => track.stop())
+    callRef.current?.hangUp()
+    callRef.current = null
     sessionRef.current = null
-    pcRef.current = null
-    streamRef.current = null
     openTurns.current.clear()
     setPhase('idle')
   }, [])
@@ -123,24 +116,21 @@ export default function LiveCall({ voice = 'cove' }: { voice?: LiveVoice }) {
     setLines([])
     setPhase('connecting')
     try {
-      const pc = new RTCPeerConnection()
-      pcRef.current = pc
-
-      // Remote audio arrives as a track, so it needs a sink to actually play.
-      pc.ontrack = (event) => {
-        if (audioRef.current === null) return
-        audioRef.current.srcObject = event.streams[0] ?? null
-        void audioRef.current.play()
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      streamRef.current = stream
-      stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream))
-
-      // The channel must exist before createOffer, or it is missing from the SDP.
-      const channel = pc.createDataChannel('oai-events')
-
-      sessionRef.current = attachLiveSession(channel, {
+      const call = await connectLiveCall({
+        ...(audioRef.current === null ? {} : { audioElement: audioRef.current }),
+        // The peer connection, the mic, and the offer/answer ordering live in the library.
+        negotiate: async (offerSdp) => {
+          const response = await fetch('/api/call', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sdp: offerSdp, voice }),
+          })
+          const payload = (await response.json()) as { sdp?: string; error?: string }
+          if (!response.ok || payload.sdp === undefined) {
+            throw new Error(payload.error ?? 'call failed')
+          }
+          return payload.sdp
+        },
         onSessionStarted: () => setPhase('listening'),
         onTurn,
         onError: (cause) => setError(cause.message),
@@ -157,19 +147,8 @@ export default function LiveCall({ voice = 'cove' }: { voice?: LiveVoice }) {
         },
       })
 
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      if (offer.sdp === undefined) throw new Error('offer had no SDP')
-
-      const response = await fetch('/api/call', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sdp: offer.sdp, voice }),
-      })
-      const payload = (await response.json()) as { sdp?: string; error?: string }
-      if (!response.ok || payload.sdp === undefined) throw new Error(payload.error ?? 'call failed')
-
-      await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp })
+      callRef.current = call
+      sessionRef.current = call.session
     } catch (cause) {
       setError((cause as Error).message)
       hangUp()

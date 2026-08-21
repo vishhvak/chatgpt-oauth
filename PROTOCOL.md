@@ -349,3 +349,60 @@ Three behaviours that surprise callers, all observed rather than documented:
 3. **Plan, not credits, is the gate.** Requests succeeded while `x-codex-credits-has-credits` was `False`. Codex refuses this path client-side only for `PlanType::Free`, so a `403` here means the plan, not the credential.
 
 Rate-limit headers match `/responses` exactly, so the existing `parseRateLimitHeaders` applies unchanged.
+
+## 14. Realtime transport (experimental)
+
+Full-duplex voice with `gpt-live-1`. Verified live on one ChatGPT Pro account, 2026-08-03, and unchanged since. **The evidence base is a single account and a single session**: the behaviour below is not known to hold on Plus or Free, so treat plan-dependent details as unverified rather than general. Undocumented backend surface; it can change without notice.
+
+WebRTC is the only transport. The WebSocket wire refuses a subscription token outright (`realtime conversation requires API key auth`), so a client needs a real WebRTC stack: a browser, `aiortc`, or a native binding. This is why no port other than TypeScript implements this section.
+
+POST `https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas` with an SDP offer. The response body is the answer SDP and `Location` carries the call id.
+
+```text
+authorization: Bearer <access token>
+chatgpt-account-id: <accountId>       # omit when unavailable
+openai-alpha: quicksilver=v2
+originator: codex_cli_rs
+content-type: application/json
+```
+
+Three things must be right together or the call is refused:
+
+1. **Both query parameters.** Dropping `architecture` returns `400 Header 'OpenAI-Alpha' requires 'intent=quicksilver&architecture=avas'`.
+2. **The `openai-alpha` header.** The value says `v2`; it selects the wire upstream source calls v3. The naming is inconsistent at the source, not here.
+3. **A session body with no `type` field** and no `audio.input` block, carrying `delegation` instead. Sending `{"type": "quicksilver"}` returns `403 Voice session access denied` on an account where the shape below succeeds, so that `403` reads like an entitlement problem and is not one.
+
+```json
+{
+  "sdp": "<offer>",
+  "session": {
+    "model": "gpt-live-1-boulder-alpha",
+    "audio": { "output": { "voice": "cove" } },
+    "delegation": { "type": "client" }
+  }
+}
+```
+
+`delegation.type: "client"` is what makes the caller the background model rather than letting the backend pick one.
+
+Client events are exactly five, and the server names them back when anything else is sent: `session.update`, `session.context.append`, `delegation.context.append`, `delegation.function_call_output.create`, `session.close`. In particular `conversation.item.create` and `response.create` do not exist on this wire.
+
+Server events are their own vocabulary, and transcript text lives at `item.text` rather than at `delta`:
+
+| this wire | the turn-based wire |
+|---|---|
+| `session.started` | `session.created` |
+| `turn.created` / `turn.delta` / `turn.done` | `response.created` / `response.done` |
+| `output_transcript.added` | `response.output_audio_transcript.delta` |
+| `input_transcript.added` | `conversation.item.input_audio_transcription.delta` |
+| `delegation.created` | no equivalent |
+
+Turns carry `start_ms`, `end_ms` and a rolling `transcript`, and they overlap: an assistant turn can open before the user turn that prompted it has closed. That overlap is the observable signature of full duplex, and it is why a turn-based client cannot express this protocol.
+
+Appended text is routed by `channel`, which is the whole reason the architecture works:
+
+| channel | when | effect |
+|---|---|---|
+| `commentary` | while delegated work runs | spoken as progress, so the call does not go silent |
+| `speakable` | when the answer is ready | spoken as the answer |
+| `analysis` | any time | added as context, never voiced |

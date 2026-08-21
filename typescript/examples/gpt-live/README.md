@@ -14,6 +14,15 @@ Open http://localhost:3000, allow the microphone, and talk. Ask it something tha
 lookup and watch the orb turn amber: that is `gpt-5.6-sol` answering in the background while
 gpt-live keeps talking to you.
 
+## Two answers to the same call
+
+Below the orb sits a route picker. "gpt-live + delegate" is the architecture described in this
+file: this app signals directly and runs the delegate itself. "codex agent" hands the session to a
+spawned codex app-server instead: the same voice, but the delegate is the codex thread, an agent
+that can read files and run commands in this repo, and `/api/delegate` sits idle. One browser call
+(`connectLiveCall`), two owners of the credentialed session, which is the point of keeping the
+peer connection out of the signalling layer.
+
 ## Why this is not a turn-based voice demo
 
 `gpt-live-1-boulder-alpha` is full-duplex. It listens and speaks at the same time and makes an
@@ -100,7 +109,8 @@ accumulating deltas: you get both sides of the conversation as completed turns.
 | file | role |
 | --- | --- |
 | `lib/auth.ts` | one server-side session; the browser never sees a token |
-| `app/api/call/route.ts` | `createLiveCall` from `chatgpt-oauth/realtime` |
+| `app/api/call/route.ts` | `createLiveCall` from `chatgpt-oauth/realtime`; this app runs the delegate |
+| `app/api/call-codex/route.ts` | `startLiveCall` on a codex app-server; the codex thread IS the delegate, so `/api/delegate` sits idle on this route |
 | `app/api/delegate/route.ts` | `streamText` over `chatgpt-oauth/ai-sdk`, streamed back as NDJSON |
 | `components/live-call.tsx` | the UI; `connectLiveCall` from `chatgpt-oauth/realtime/browser` owns the peer connection and the event loop |
 | `components/fluid-orb.tsx` | WebGL orb, colour driven by call phase |

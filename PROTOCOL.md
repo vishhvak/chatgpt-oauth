@@ -406,3 +406,9 @@ Appended text is routed by `channel`, which is the whole reason the architecture
 | `commentary` | while delegated work runs | spoken as progress, so the call does not go silent |
 | `speakable` | when the answer is ready | spoken as the answer |
 | `analysis` | any time | added as context, never voiced |
+
+Reaching this wire does not require implementing this section. The codex app-server exposes the
+same session over JSON-RPC (`thread/realtime/start` with a WebRTC transport and version v3, answer
+SDP via the `thread/realtime/sdp` notification), with codex holding the backend connection and its
+own thread acting as the delegate. That surface is codex's protocol rather than this backend's, so
+it is not specified here; the TypeScript `app-server` entry point implements it as `startLiveCall`.

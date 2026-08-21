@@ -51,7 +51,7 @@ OpenAI. Treat them as unproven until someone reports otherwise.
 | surface | status |
 | --- | --- |
 | TypeScript `node`, `web`, `next`, `react`, `react-native`, `ai-sdk`, core | in production use, plus tests against mocks |
-| TypeScript `app-server` | tests only, and against a scripted stand-in for the Codex binary rather than the real one |
+| TypeScript `app-server` | text surface: tests against a scripted stand-in for the Codex binary. Voice (`startLiveCall`): verified live against a real codex 0.148.0 and a Pro account, returning a genuine answer SDP on subscription auth |
 | TypeScript `images` | verified live against a Pro account (both endpoints, generation and edit), plus tests against mocks; undocumented backend, see PROTOCOL.md §13 |
 | TypeScript `realtime`, `realtime/browser` | verified live against a Pro account (signalling, delegation, audio both ways); the browser microphone path has never been driven by a human. WebRTC only, so no other port implements it. See PROTOCOL.md §14 |
 | Electron, Tauri | expected to work through the `node` and `web` entries; no specific code, tests, or reported use |

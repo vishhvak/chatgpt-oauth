@@ -38,7 +38,7 @@ importers:
         version: 19.2.3(@types/react@19.2.17)
       ai:
         specifier: ^7.0.34
-        version: 7.0.34(zod@3.25.76)
+        version: 7.0.37(zod@3.25.76)
       eslint:
         specifier: ^9.32.0
         version: 9.39.5
@@ -72,8 +72,8 @@ importers:
 
 packages:
 
-  '@ai-sdk/gateway@4.0.26':
-    resolution: {integrity: sha512-b/nc3COKtk8IxzgcCi418IoZFky/Bw+Jg8+J0/SBBnu/mOXA4bkIKCu81coEtJAWuH2g5Fvvsa0ar7EpmzNWTw==}
+  '@ai-sdk/gateway@4.0.28':
+    resolution: {integrity: sha512-ee9TsNO3mkgHDWmTmJ8Fvltr6PFh52zhrV2+FaKJY3F3iu7kWZi5tCRJCR1HVhhlpj6lHniUb28nLQdPHkA/1Q==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -1468,8 +1468,8 @@ packages:
     engines: {node: '>=18.18'}
     hasBin: true
 
-  ai@7.0.34:
-    resolution: {integrity: sha512-jDqclWYqPGFKcUG4CQiKcBiwi5XqVMqvYy6eJdujVpvE1SDoB6j7RtjrGYz3Bn5B1dzTj1StAlrOebY//WK9/Q==}
+  ai@7.0.37:
+    resolution: {integrity: sha512-stF+SEQJgKY3Qfe3FwNzqUrehHviOp2l7LemoI8YMOa0Zk5PxKsRNgUk3cHXz0RAue9RRyCAis2fz6LSCP6EKw==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -3501,7 +3501,7 @@ packages:
 
 snapshots:
 
-  '@ai-sdk/gateway@4.0.26(zod@3.25.76)':
+  '@ai-sdk/gateway@4.0.28(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 4.0.3
       '@ai-sdk/provider-utils': 5.0.12(zod@3.25.76)
@@ -5025,9 +5025,9 @@ snapshots:
 
   agent-cli-detector@0.1.4: {}
 
-  ai@7.0.34(zod@3.25.76):
+  ai@7.0.37(zod@3.25.76):
     dependencies:
-      '@ai-sdk/gateway': 4.0.26(zod@3.25.76)
+      '@ai-sdk/gateway': 4.0.28(zod@3.25.76)
       '@ai-sdk/provider': 4.0.3
       '@ai-sdk/provider-utils': 5.0.12(zod@3.25.76)
       zod: 3.25.76

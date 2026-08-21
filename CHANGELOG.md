@@ -28,6 +28,13 @@ them cannot be ported without a WebRTC stack.
   first-class option, and the gate is the account plan rather than credits, which is why a `403`
   reports a plan problem instead of implying a bad token.
 
+- **`chatgpt-oauth/realtime/browser`** collapses the browser handshake into one `connectLiveCall`
+  call. It exists because the ordering is load-bearing and fails silently: a data channel created
+  after `createOffer` never reaches the SDP, leaving a live call with no event channel. Echo
+  cancellation is requested by default, without which the model hears its own voice. Kept as a
+  separate entry point so the core stays free of DOM types and keeps running in Node and in tests
+  with no WebRTC at all.
+
 Both surfaces read undocumented backend endpoints and can break without notice. The warning at the
 top of the README applies to them in full.
 

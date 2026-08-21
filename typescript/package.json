@@ -73,6 +73,10 @@
       "types": "./dist/realtime/index.d.ts",
       "import": "./dist/realtime/index.js"
     },
+    "./realtime/browser": {
+      "types": "./dist/realtime/browser.d.ts",
+      "import": "./dist/realtime/browser.js"
+    },
     "./web": {
       "types": "./dist/web/index.d.ts",
       "import": "./dist/web/index.js"

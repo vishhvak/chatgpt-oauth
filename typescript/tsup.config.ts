@@ -12,6 +12,7 @@ export default defineConfig({
     "react/index": "src/react/index.tsx",
     "react-native/index": "src/react-native/index.ts",
     "realtime/index": "src/realtime/index.ts",
+    "realtime/browser": "src/realtime/browser.ts",
     "web/index": "src/web/index.ts",
   },
   format: "esm",

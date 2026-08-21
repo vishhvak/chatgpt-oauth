@@ -102,7 +102,7 @@ accumulating deltas: you get both sides of the conversation as completed turns.
 | `lib/auth.ts` | one server-side session; the browser never sees a token |
 | `app/api/call/route.ts` | `createLiveCall` from `chatgpt-oauth/realtime` |
 | `app/api/delegate/route.ts` | `streamText` over `chatgpt-oauth/ai-sdk`, streamed back as NDJSON |
-| `components/live-call.tsx` | the peer connection and the UI; `attachLiveSession` runs the event loop |
+| `components/live-call.tsx` | the UI; `connectLiveCall` from `chatgpt-oauth/realtime/browser` owns the peer connection and the event loop |
 | `components/fluid-orb.tsx` | WebGL orb, colour driven by call phase |
 
 The delegate deliberately goes through the AI SDK provider rather than the raw client. That is

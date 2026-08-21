@@ -49,6 +49,10 @@
       "types": "./dist/http/index.d.ts",
       "import": "./dist/http/index.js"
     },
+    "./images": {
+      "types": "./dist/images/index.d.ts",
+      "import": "./dist/images/index.js"
+    },
     "./next": {
       "types": "./dist/next/index.d.ts",
       "import": "./dist/next/index.js"

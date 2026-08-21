@@ -6,6 +6,7 @@ export default defineConfig({
     "ai-sdk/index": "src/ai-sdk/index.ts",
     "app-server/index": "src/app-server/index.ts",
     "http/index": "src/http/index.ts",
+    "images/index": "src/images/index.ts",
     "next/index": "src/next/index.ts",
     "node/index": "src/node/index.ts",
     "react/index": "src/react/index.tsx",

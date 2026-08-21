@@ -52,6 +52,7 @@ OpenAI. Treat them as unproven until someone reports otherwise.
 | --- | --- |
 | TypeScript `node`, `web`, `next`, `react`, `react-native`, `ai-sdk`, core | in production use, plus tests against mocks |
 | TypeScript `app-server` | tests only, and against a scripted stand-in for the Codex binary rather than the real one |
+| TypeScript `images` | verified live against a Pro account (both endpoints, generation and edit), plus tests against mocks; undocumented backend, see PROTOCOL.md §13 |
 | Electron, Tauri | expected to work through the `node` and `web` entries; no specific code, tests, or reported use |
 | Python core, loopback, file store | tests against mocks; no known production use |
 | Kotlin JVM core | tests against mocks; no known production use |

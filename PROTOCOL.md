@@ -294,3 +294,58 @@ Every public failure extends a common error and carries a stable code:
 | `StoreError` | `store` |
 
 Do not decide behavior by matching human-readable error strings.
+
+## 13. Images transport (experimental)
+
+Two endpoints sit beside `/responses` under the same base URL and accept the same bearer token, so image generation needs no API key. Verified live on a Pro account, 2026-08-09. Undocumented backend surface: it can change without notice.
+
+POST `https://chatgpt.com/backend-api/codex/images/generations` (text to image) or `.../images/edits` (reference images plus a prompt). No query parameters are required. Headers:
+
+```text
+authorization: Bearer <access token>
+chatgpt-account-id: <accountId>       # omit when unavailable
+x-codex-image-turn-id: <UUID>         # one per request; correlates the call with its turn
+originator: codex_cli_rs
+content-type: application/json
+```
+
+Generation body. Only `prompt` and `model` are required:
+
+```json
+{
+  "prompt": "<required>",
+  "model": "gpt-image-2",
+  "n": 1,
+  "quality": "low | medium | high | auto",
+  "background": "transparent | opaque | auto",
+  "size": "1024x1024"
+}
+```
+
+Edits take the same fields plus `images`, an array of data URLs rather than raw bytes:
+
+```json
+{ "images": [{ "image_url": "data:image/png;base64,<...>" }], "prompt": "<required>", "model": "gpt-image-2" }
+```
+
+The response carries base64 images and the settings actually used:
+
+```json
+{
+  "created": 1787270572,
+  "data": [{ "b64_json": "<base64 png>" }],
+  "background": "opaque",
+  "quality": "medium",
+  "size": "1254x1254",
+  "output_format": "png",
+  "usage": { "input_tokens": 1548, "output_tokens": 915, "total_tokens": 2463 }
+}
+```
+
+Three behaviours that surprise callers, all observed rather than documented:
+
+1. **`size` and `quality` are hints.** A `1024x1024`, `quality: "low"` request returned a `1254x1254` image at `quality: "medium"`. Read the response fields; do not assume the request was honoured.
+2. **Latency is high.** Generations ran 16 to 30 seconds and an edit ran 63 seconds on a Pro account. Callers need cancellation and progress feedback, not a spinner with no exit.
+3. **Plan, not credits, is the gate.** Requests succeeded while `x-codex-credits-has-credits` was `False`. Codex refuses this path client-side only for `PlanType::Free`, so a `403` here means the plan, not the credential.
+
+Rate-limit headers match `/responses` exactly, so the existing `parseRateLimitHeaders` applies unchanged.

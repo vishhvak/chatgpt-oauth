@@ -6,6 +6,31 @@ released by git tag.
 
 While the project is `0.x`, behaviour changes bump the minor.
 
+## 0.3.0
+
+Two new TypeScript surfaces, both reached over the same subscription credential the library already
+holds, and both verified against a live Pro account rather than against fixtures. Python, Kotlin and
+Swift are unchanged: neither surface is in `PROTOCOL.md` as a requirement for a port yet, and one of
+them cannot be ported without a WebRTC stack.
+
+### Added
+
+- **`chatgpt-oauth/realtime`** drives `gpt-live-1`, the full-duplex voice model, over a subscription
+  token. `createLiveCall` handles signalling; `attachLiveSession` runs the event loop including the
+  client-delegation round trip, which is what keeps a call from going silent while a background model
+  works. The peer connection stays with the caller on purpose: WebRTC is the one piece that does not
+  port across languages, so the session half accepts anything structurally shaped like a data
+  channel, and its tests need no WebRTC at all. Ships a Next.js example that drives a real call.
+- **`chatgpt-oauth/images`** generates and edits images with `gpt-image-2`. Codex reaches these two
+  endpoints beside `/responses` with the same bearer token, so no API key is involved. Recorded in
+  `PROTOCOL.md` §13, along with three behaviours the wire does not advertise: `size` and `quality`
+  are hints rather than instructions, requests take 16 to 63 seconds so cancellation is a
+  first-class option, and the gate is the account plan rather than credits, which is why a `403`
+  reports a plan problem instead of implying a bad token.
+
+Both surfaces read undocumented backend endpoints and can break without notice. The warning at the
+top of the README applies to them in full.
+
 ## 0.2.1
 
 Two bugs that made the AI SDK bridge unusable against the real backend. Both were invisible to the
